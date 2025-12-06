@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Whisper Voice - Application de transcription vocale pour Mac
+Whisper Voice - macOS voice transcription app
 
 Usage:
     python main.py
 
-Raccourci: Option+Espace pour démarrer/arrêter l'enregistrement
+Shortcut: Option+Space to start/stop recording
 """
 
 import rumps
@@ -18,7 +18,7 @@ from clipboard import paste_text
 
 
 def log(msg):
-    """Log avec timestamp."""
+    """Log with timestamp."""
     timestamp = time.strftime("%H:%M:%S")
     print(f"[{timestamp}] {msg}")
 
@@ -28,101 +28,101 @@ class WhisperApp(rumps.App):
         super().__init__("🎤", quit_button=None)
         self.recorder = Recorder()
         self.menu = [
-            rumps.MenuItem("Option+Espace pour enregistrer", callback=None),
-            None,  # Séparateur
-            rumps.MenuItem("Quitter", callback=self.quit_app)
+            rumps.MenuItem("Option+Space to record", callback=None),
+            None,  # Separator
+            rumps.MenuItem("Quit", callback=self.quit_app)
         ]
 
-        log("App initialisée")
+        log("App initialized")
 
-        # Lance l'écoute du raccourci clavier dans un thread séparé
+        # Start keyboard shortcut listener in a separate thread
         self.hotkey_thread = threading.Thread(target=self.listen_hotkey, daemon=True)
         self.hotkey_thread.start()
-        log("Écoute du raccourci clavier démarrée")
+        log("Keyboard shortcut listener started")
 
     def listen_hotkey(self):
-        """Écoute le raccourci clavier global."""
+        """Listen for global keyboard shortcut."""
         with keyboard.GlobalHotKeys({
             '<alt>+<space>': self.toggle_recording
         }) as hotkey:
             hotkey.join()
 
     def toggle_recording(self):
-        """Démarre ou arrête l'enregistrement."""
-        log("Toggle recording appelé")
+        """Start or stop recording."""
+        log("Toggle recording called")
         if self.recorder.is_recording():
             self.stop_recording()
         else:
             self.start_recording()
 
     def start_recording(self):
-        """Démarre l'enregistrement."""
-        log("▶ Démarrage enregistrement...")
+        """Start recording."""
+        log("▶ Starting recording...")
         self.title = "🔴"
         self.recorder.start()
-        log("✓ Enregistrement démarré")
+        log("✓ Recording started")
         rumps.notification(
             title="Whisper Voice",
-            subtitle="Enregistrement...",
-            message="Option+Espace pour arrêter"
+            subtitle="Recording...",
+            message="Option+Space to stop"
         )
 
     def stop_recording(self):
-        """Arrête l'enregistrement et transcrit."""
-        log("⏹ Arrêt enregistrement...")
+        """Stop recording and transcribe."""
+        log("⏹ Stopping recording...")
         self.title = "⏳"
         audio_path = self.recorder.stop()
-        log(f"✓ Audio sauvegardé: {audio_path}")
+        log(f"✓ Audio saved: {audio_path}")
 
         if audio_path:
-            # Transcription dans un thread pour ne pas bloquer l'UI
-            log("→ Lancement thread de transcription...")
+            # Transcription in a thread to avoid blocking the UI
+            log("→ Starting transcription thread...")
             threading.Thread(target=self.transcribe_audio, args=(audio_path,), daemon=True).start()
         else:
             self.title = "🎤"
-            log("✗ Aucun audio enregistré")
+            log("✗ No audio recorded")
             rumps.notification(
                 title="Whisper Voice",
-                subtitle="Erreur",
-                message="Aucun audio enregistré"
+                subtitle="Error",
+                message="No audio recorded"
             )
 
     def transcribe_audio(self, audio_path):
-        """Transcrit l'audio et colle le texte."""
+        """Transcribe audio and paste text."""
         try:
-            log("📤 Envoi à l'API Whisper...")
+            log("📤 Sending to Whisper API...")
             start_time = time.time()
             text = transcribe(audio_path)
             elapsed = time.time() - start_time
-            log(f"✓ Transcription reçue en {elapsed:.1f}s ({len(text)} caractères)")
+            log(f"✓ Transcription received in {elapsed:.1f}s ({len(text)} characters)")
 
-            log("📋 Collage du texte...")
+            log("📋 Pasting text...")
             paste_text(text)
-            log("✓ Texte collé")
+            log("✓ Text pasted")
 
             self.title = "🎤"
             rumps.notification(
                 title="Whisper Voice",
-                subtitle="Transcription terminée",
+                subtitle="Transcription complete",
                 message=text[:50] + "..." if len(text) > 50 else text
             )
         except Exception as e:
             self.title = "🎤"
-            log(f"✗ ERREUR: {e}")
+            log(f"✗ ERROR: {e}")
             rumps.notification(
                 title="Whisper Voice",
-                subtitle="Erreur",
+                subtitle="Error",
                 message=str(e)
             )
 
     def quit_app(self, _):
-        """Quitte l'application."""
-        log("Fermeture de l'application")
+        """Quit the application."""
+        log("Closing application")
         rumps.quit_application()
 
 
 if __name__ == "__main__":
     log("=" * 50)
-    log("🎤 Whisper Voice - Démarrage")
+    log("🎤 Whisper Voice - Starting")
     log("=" * 50)
     WhisperApp().run()

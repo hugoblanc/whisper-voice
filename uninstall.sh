@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=================================="
-echo "  Whisper Voice - Désinstallation"
+echo "  Whisper Voice - Uninstallation"
 echo "=================================="
 echo ""
 
@@ -12,24 +12,24 @@ NC='\033[0m'
 
 PLIST_PATH="$HOME/Library/LaunchAgents/com.whisper-voice.plist"
 
-# Arrêter le service
+# Stop the service
 if [ -f "$PLIST_PATH" ]; then
-    echo "Arrêt du service..."
+    echo "Stopping service..."
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     rm "$PLIST_PATH"
-    echo -e "${GREEN}✓ Service arrêté et supprimé${NC}"
+    echo -e "${GREEN}✓ Service stopped and removed${NC}"
 else
-    echo "Aucun service de démarrage automatique trouvé"
+    echo "No auto-start service found"
 fi
 
-# Supprimer les logs
+# Delete logs
 if [ -f "$HOME/.whisper-voice.log" ]; then
     rm "$HOME/.whisper-voice.log"
-    echo -e "${GREEN}✓ Logs supprimés${NC}"
+    echo -e "${GREEN}✓ Logs deleted${NC}"
 fi
 
 echo ""
-echo -e "${YELLOW}Note:${NC} Les fichiers du projet n'ont pas été supprimés."
-echo "Pour supprimer complètement, supprimez le dossier manuellement."
+echo -e "${YELLOW}Note:${NC} Project files have not been deleted."
+echo "To remove completely, delete the folder manually."
 echo ""
-echo -e "${GREEN}Désinstallation terminée !${NC}"
+echo -e "${GREEN}Uninstallation complete!${NC}"

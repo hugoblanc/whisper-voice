@@ -1,69 +1,69 @@
 # Whisper Voice
 
-Application macOS de transcription vocale utilisant l'API OpenAI Whisper.
+macOS voice transcription app using the OpenAI Whisper API.
 
-**Option+Espace** pour enregistrer votre voix, et le texte transcrit est automatiquement collé à l'emplacement du curseur.
+**Option+Space** to record your voice, and the transcribed text is automatically pasted at the cursor location.
 
-## Fonctionnalités
+## Features
 
-- Raccourci clavier global (Option+Espace)
-- Icône dans la barre de menu (🎤 → 🔴 → ⏳)
-- Notifications macOS
-- Collage automatique du texte transcrit
+- Global keyboard shortcut (Option+Space)
+- Menu bar icon (🎤 → 🔴 → ⏳)
+- macOS notifications
+- Automatic text pasting
 
-## Prérequis
+## Requirements
 
 - macOS
 - Python 3.10+
-- Une clé API OpenAI ([obtenir une clé](https://platform.openai.com/api-keys))
+- An OpenAI API key ([get a key](https://platform.openai.com/api-keys))
 
 ## Installation
 
 ```bash
-# Cloner le repo
-git clone https://github.com/VOTRE_USERNAME/whisper-voice.git
+# Clone the repo
+git clone https://github.com/hugoblanc/whisper-voice.git
 cd whisper-voice
 
-# Lancer l'installation
+# Run the installation
 ./install.sh
 ```
 
-Le script d'installation va :
-1. Installer les dépendances Python
-2. Vous demander votre clé API OpenAI
-3. Configurer le démarrage automatique (optionnel)
+The installation script will:
+1. Install Python dependencies
+2. Ask for your OpenAI API key
+3. Configure auto-start (optional)
 
-## Utilisation
+## Usage
 
-### Lancement manuel
+### Manual launch
 
 ```bash
 python main.py
 ```
 
-### Raccourci
+### Shortcut
 
-| Action | Raccourci |
-|--------|-----------|
-| Démarrer/Arrêter l'enregistrement | **Option+Espace** |
+| Action | Shortcut |
+|--------|----------|
+| Start/Stop recording | **Option+Space** |
 
-### Indicateurs visuels (barre de menu)
+### Visual indicators (menu bar)
 
-| Icône | État |
-|-------|------|
-| 🎤 | En attente |
-| 🔴 | Enregistrement en cours |
-| ⏳ | Transcription en cours |
+| Icon | State |
+|------|-------|
+| 🎤 | Idle |
+| 🔴 | Recording |
+| ⏳ | Transcribing |
 
-## Permissions macOS
+## macOS Permissions
 
-Au premier lancement, macOS demandera d'autoriser :
+On first launch, macOS will ask you to authorize:
 
-1. **Microphone** : pour enregistrer votre voix
-2. **Accessibilité** : Préférences Système → Confidentialité et sécurité → Accessibilité → Ajouter Terminal
-3. **Surveillance de l'entrée** : Préférences Système → Confidentialité et sécurité → Surveillance de l'entrée → Ajouter Terminal
+1. **Microphone**: to record your voice
+2. **Accessibility**: System Preferences → Privacy & Security → Accessibility → Add Terminal
+3. **Input Monitoring**: System Preferences → Privacy & Security → Input Monitoring → Add Terminal
 
-## Désinstallation
+## Uninstallation
 
 ```bash
 ./uninstall.sh
@@ -71,24 +71,24 @@ Au premier lancement, macOS demandera d'autoriser :
 
 ## Configuration
 
-Le fichier `.env` contient votre clé API :
+The `.env` file contains your API key:
 
 ```
-OPENAI_API_KEY=sk-votre-clé-ici
+OPENAI_API_KEY=sk-your-key-here
 ```
 
-## Dépannage
+## Troubleshooting
 
-### Le raccourci ne fonctionne pas
+### Shortcut not working
 
-Vérifiez que Terminal est bien ajouté dans :
-- Préférences Système → Confidentialité et sécurité → Accessibilité
-- Préférences Système → Confidentialité et sécurité → Surveillance de l'entrée
+Make sure Terminal is added in:
+- System Preferences → Privacy & Security → Accessibility
+- System Preferences → Privacy & Security → Input Monitoring
 
-### Erreur "This process is not trusted"
+### "This process is not trusted" error
 
-Ajoutez Terminal dans les préférences d'Accessibilité, puis relancez l'application.
+Add Terminal in Accessibility preferences, then restart the application.
 
-## Licence
+## License
 
 MIT

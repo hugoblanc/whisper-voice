@@ -5,12 +5,12 @@ from pynput.keyboard import Controller, Key
 
 def paste_text(text: str):
     """
-    Copie le texte dans le clipboard et simule Cmd+V pour le coller.
+    Copy text to clipboard and simulate Cmd+V to paste.
 
     Args:
-        text: Le texte à coller
+        text: The text to paste
     """
-    # Copie dans le clipboard via pbcopy (macOS)
+    # Copy to clipboard via pbcopy (macOS)
     process = subprocess.Popen(
         ["pbcopy"],
         stdin=subprocess.PIPE,
@@ -18,10 +18,10 @@ def paste_text(text: str):
     )
     process.communicate(text.encode("utf-8"))
 
-    # Petit délai pour s'assurer que le clipboard est prêt
+    # Small delay to ensure clipboard is ready
     time.sleep(0.1)
 
-    # Simule Cmd+V
+    # Simulate Cmd+V
     keyboard = Controller()
     keyboard.press(Key.cmd)
     keyboard.press("v")
