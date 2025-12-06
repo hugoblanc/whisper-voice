@@ -34,7 +34,7 @@ def transcribe(audio_path: str) -> str:
         log("Calling Whisper API...")
         start = time.time()
         transcription = client.audio.transcriptions.create(
-            model="whisper-1",
+            model="gpt-4o-mini-transcribe",
             file=audio_file
         )
         elapsed = time.time() - start
