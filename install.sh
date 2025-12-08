@@ -17,6 +17,10 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+APP_NAME="Whisper Voice"
+APP_PATH="$HOME/Applications/$APP_NAME.app"
+PLIST_PATH="$HOME/Library/LaunchAgents/com.whisper-voice.plist"
+
 # Check Python
 echo "Checking Python..."
 if ! command -v python3 &> /dev/null; then
@@ -25,8 +29,9 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+PYTHON_PATH=$(which python3)
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo -e "${GREEN}✓ Python $PYTHON_VERSION found${NC}"
+echo -e "${GREEN}✓ Python $PYTHON_VERSION found ($PYTHON_PATH)${NC}"
 
 # Install dependencies
 echo ""
@@ -53,15 +58,51 @@ else
     echo -e "${GREEN}✓ Existing .env file found${NC}"
 fi
 
-# Create Info.plist file for rumps (notifications)
+# Create .app bundle
 echo ""
-echo "Configuring notifications..."
-PYTHON_BIN_DIR=$(python3 -c "import sys; print(sys.prefix)")/bin
-if [ ! -f "$PYTHON_BIN_DIR/Info.plist" ]; then
-    /usr/libexec/PlistBuddy -c 'Create' "$PYTHON_BIN_DIR/Info.plist" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string "whisper-voice"' "$PYTHON_BIN_DIR/Info.plist" 2>/dev/null || true
-fi
-echo -e "${GREEN}✓ Notifications configured${NC}"
+echo "Creating application bundle..."
+mkdir -p "$APP_PATH/Contents/MacOS"
+mkdir -p "$APP_PATH/Contents/Resources"
+
+# Create executable
+cat > "$APP_PATH/Contents/MacOS/whisper-voice" << EOF
+#!/bin/bash
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$SCRIPT_DIR"
+exec $PYTHON_PATH -u main.py 2>&1 | tee -a ~/.whisper-voice.log
+EOF
+
+chmod +x "$APP_PATH/Contents/MacOS/whisper-voice"
+
+# Create Info.plist
+cat > "$APP_PATH/Contents/Info.plist" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>whisper-voice</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.whisper-voice</string>
+    <key>CFBundleName</key>
+    <string>Whisper Voice</string>
+    <key>CFBundleDisplayName</key>
+    <string>Whisper Voice</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Whisper Voice needs microphone access to record audio for transcription.</string>
+</dict>
+</plist>
+EOF
+
+echo -e "${GREEN}✓ Application created at ~/Applications/$APP_NAME.app${NC}"
 
 # Auto-start
 echo ""
@@ -69,9 +110,6 @@ echo -e "${YELLOW}Do you want Whisper Voice to start automatically at login?${NC
 read -p "(y/n): " AUTO_START
 
 if [ "$AUTO_START" = "y" ] || [ "$AUTO_START" = "Y" ] || [ "$AUTO_START" = "yes" ]; then
-    PLIST_PATH="$HOME/Library/LaunchAgents/com.whisper-voice.plist"
-    PYTHON_PATH=$(which python3)
-
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -81,17 +119,14 @@ if [ "$AUTO_START" = "y" ] || [ "$AUTO_START" = "Y" ] || [ "$AUTO_START" = "yes"
     <string>com.whisper-voice</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$PYTHON_PATH</string>
-        <string>$SCRIPT_DIR/main.py</string>
+        <string>/usr/bin/open</string>
+        <string>-a</string>
+        <string>$APP_PATH</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
-    <key>WorkingDirectory</key>
-    <string>$SCRIPT_DIR</string>
-    <key>StandardOutPath</key>
-    <string>$HOME/.whisper-voice.log</string>
-    <key>StandardErrorPath</key>
-    <string>$HOME/.whisper-voice.log</string>
+    <key>KeepAlive</key>
+    <false/>
 </dict>
 </plist>
 EOF
@@ -100,7 +135,6 @@ EOF
     launchctl load "$PLIST_PATH"
 
     echo -e "${GREEN}✓ Auto-start configured${NC}"
-    echo "  Logs: ~/.whisper-voice.log"
 fi
 
 echo ""
@@ -108,12 +142,15 @@ echo "=================================="
 echo -e "${GREEN}  Installation complete!${NC}"
 echo "=================================="
 echo ""
-echo "To launch manually:"
-echo "  python3 main.py"
+echo "To launch:"
+echo "  open -a \"$APP_NAME\""
 echo ""
 echo "Shortcut: Option+Space"
 echo ""
-echo -e "${YELLOW}Important:${NC} On first launch, authorize Terminal in:"
+echo -e "${YELLOW}Important:${NC} Add \"$APP_NAME\" to:"
 echo "  System Preferences → Privacy & Security → Accessibility"
 echo "  System Preferences → Privacy & Security → Input Monitoring"
+echo "  System Preferences → Privacy & Security → Automation → System Events"
+echo ""
+echo "Logs: ~/.whisper-voice.log"
 echo ""

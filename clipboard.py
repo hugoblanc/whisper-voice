@@ -1,6 +1,5 @@
 import subprocess
 import time
-from pynput.keyboard import Controller, Key
 
 
 def paste_text(text: str):
@@ -21,9 +20,8 @@ def paste_text(text: str):
     # Small delay to ensure clipboard is ready
     time.sleep(0.1)
 
-    # Simulate Cmd+V
-    keyboard = Controller()
-    keyboard.press(Key.cmd)
-    keyboard.press("v")
-    keyboard.release("v")
-    keyboard.release(Key.cmd)
+    # Simulate Cmd+V using AppleScript (more reliable than pynput)
+    subprocess.run([
+        "osascript", "-e",
+        'tell application "System Events" to keystroke "v" using command down'
+    ])
