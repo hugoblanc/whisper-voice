@@ -27,3 +27,6 @@ ENV/
 *.tmp
 *.temp
 *.wav
+
+# Icon generation intermediate files
+icons/AppIcon.iconset/

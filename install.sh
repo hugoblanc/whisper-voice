@@ -20,6 +20,7 @@ cd "$SCRIPT_DIR"
 APP_NAME="Whisper Voice"
 APP_PATH="$HOME/Applications/$APP_NAME.app"
 PLIST_PATH="$HOME/Library/LaunchAgents/com.whisper-voice.plist"
+VERSION="1.1.0"
 
 # Check Python
 echo "Checking Python..."
@@ -36,8 +37,20 @@ echo -e "${GREEN}✓ Python $PYTHON_VERSION found ($PYTHON_PATH)${NC}"
 # Install dependencies
 echo ""
 echo "Installing dependencies..."
-pip3 install -r requirements.txt
+pip3 install -r requirements.txt --quiet
 echo -e "${GREEN}✓ Dependencies installed${NC}"
+
+# Generate icons if needed
+echo ""
+echo "Checking icons..."
+if [ ! -f "$SCRIPT_DIR/icons/AppIcon.icns" ]; then
+    echo "Generating icons..."
+    pip3 install Pillow --quiet
+    python3 "$SCRIPT_DIR/generate_icons.py"
+    echo -e "${GREEN}✓ Icons generated${NC}"
+else
+    echo -e "${GREEN}✓ Icons found${NC}"
+fi
 
 # Configure API key
 echo ""
@@ -64,6 +77,11 @@ echo "Creating application bundle..."
 mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
 
+# Copy app icon
+if [ -f "$SCRIPT_DIR/icons/AppIcon.icns" ]; then
+    cp "$SCRIPT_DIR/icons/AppIcon.icns" "$APP_PATH/Contents/Resources/"
+fi
+
 # Create executable
 cat > "$APP_PATH/Contents/MacOS/whisper-voice" << EOF
 #!/bin/bash
@@ -74,8 +92,8 @@ EOF
 
 chmod +x "$APP_PATH/Contents/MacOS/whisper-voice"
 
-# Create Info.plist
-cat > "$APP_PATH/Contents/Info.plist" << 'EOF'
+# Create Info.plist with app icon
+cat > "$APP_PATH/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -91,9 +109,11 @@ cat > "$APP_PATH/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>$VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$VERSION</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
