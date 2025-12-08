@@ -33,6 +33,10 @@ class WhisperApp(rumps.App):
             rumps.MenuItem("Quit", callback=self.quit_app)
         ]
 
+        # Track pressed keys for hotkey detection
+        self.pressed_keys = set()
+        self.hotkey_lock = threading.Lock()
+
         log("App initialized")
 
         # Start keyboard shortcut listener in a separate thread
@@ -41,11 +45,22 @@ class WhisperApp(rumps.App):
         log("Keyboard shortcut listener started")
 
     def listen_hotkey(self):
-        """Listen for global keyboard shortcut."""
-        with keyboard.GlobalHotKeys({
-            '<alt>+<space>': self.toggle_recording
-        }) as hotkey:
-            hotkey.join()
+        """Listen for global keyboard shortcut using Listener (more stable than GlobalHotKeys)."""
+        def on_press(key):
+            with self.hotkey_lock:
+                self.pressed_keys.add(key)
+                # Check for Option+Space
+                if keyboard.Key.alt in self.pressed_keys and keyboard.Key.space in self.pressed_keys:
+                    self.pressed_keys.clear()  # Reset to avoid repeated triggers
+                    # Run toggle in separate thread to not block the listener
+                    threading.Thread(target=self.toggle_recording, daemon=True).start()
+
+        def on_release(key):
+            with self.hotkey_lock:
+                self.pressed_keys.discard(key)
+
+        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+            listener.join()
 
     def toggle_recording(self):
         """Start or stop recording."""

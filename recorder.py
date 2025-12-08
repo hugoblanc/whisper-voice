@@ -2,8 +2,15 @@ import sounddevice as sd
 import scipy.io.wavfile as wav
 import numpy as np
 import tempfile
+import time
 
 SAMPLE_RATE = 16000  # Whisper works well with 16kHz
+
+
+def log(msg):
+    """Log with timestamp."""
+    timestamp = time.strftime("%H:%M:%S")
+    print(f"[{timestamp}] [recorder] {msg}")
 
 
 class Recorder:
@@ -30,20 +37,30 @@ class Recorder:
 
     def stop(self) -> str:
         """Stop recording and save as WAV. Returns the file path."""
+        log("Setting recording flag to False...")
         self.recording = False
+
+        log("Stopping stream...")
         self.stream.stop()
+
+        log("Closing stream...")
         self.stream.close()
 
+        log(f"Frames collected: {len(self.frames)}")
         if not self.frames:
             return None
 
-        # Concatenate all frames
+        log("Concatenating audio frames...")
         audio_data = np.concatenate(self.frames, axis=0)
+        log(f"Audio data shape: {audio_data.shape}, duration: {len(audio_data)/SAMPLE_RATE:.1f}s")
 
-        # Save to temporary file
+        log("Creating temp file...")
         temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+
+        log("Writing WAV file...")
         wav.write(temp_file.name, SAMPLE_RATE, audio_data)
 
+        log(f"WAV saved: {temp_file.name}")
         return temp_file.name
 
     def is_recording(self) -> bool:
