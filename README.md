@@ -1,52 +1,46 @@
 # Whisper Voice
 
-macOS voice transcription app using the OpenAI Whisper API.
+Native macOS app for voice transcription using OpenAI's Whisper API.
 
-**Option+Space** to record your voice, and the transcribed text is automatically pasted at the cursor location.
+Press **Option+Space** to record your voice, and the transcribed text is automatically pasted at the cursor location.
 
 ## Features
 
-- Global keyboard shortcut (Option+Space)
-- Menu bar icon (🎤 → 🔴 → ⏳)
-- macOS notifications
+- Native Swift app (no Python dependency)
+- Global keyboard shortcut (configurable)
+- Menu bar icon with status indicator
 - Automatic text pasting
+- Secure API key storage
+- Lightweight (~2 MB)
 - Auto-start at login (optional)
 
 ## Requirements
 
-- macOS
-- Python 3.10+
-- An OpenAI API key ([get a key](https://platform.openai.com/api-keys))
+- macOS 12.0+
+- Xcode Command Line Tools (installed automatically)
+- OpenAI API key ([get one here](https://platform.openai.com/api-keys))
 
 ## Installation
 
 ```bash
-# Clone the repo
 git clone https://github.com/hugoblanc/whisper-voice.git
 cd whisper-voice
-
-# Run the installation
 ./install.sh
 ```
 
-The installation script will:
-1. Install Python dependencies
-2. Ask for your OpenAI API key
-3. Create a macOS application bundle (`~/Applications/Whisper Voice.app`)
-4. Configure auto-start (optional)
+The installer will guide you through:
+1. Checking Swift/Xcode tools
+2. Configuring your OpenAI API key
+3. Choosing a keyboard shortcut
+4. Building and installing the app
+5. Setting up auto-start (optional)
 
-## macOS Permissions
+## Keyboard Shortcuts
 
-After installation, add **Whisper Voice** to these privacy settings:
-
-**System Preferences → Privacy & Security →**
-
-| Permission | Why |
-|------------|-----|
-| **Accessibility** | To paste text with Cmd+V |
-| **Input Monitoring** | To detect the Option+Space shortcut |
-| **Automation → System Events** | To simulate keystrokes |
-| **Microphone** | To record audio (prompted automatically) |
+Choose during installation:
+- **Option + Space** (default)
+- **Control + Space**
+- **Command + Shift + Space**
 
 ## Usage
 
@@ -58,19 +52,44 @@ open -a "Whisper Voice"
 
 Or find it in `~/Applications/` and double-click.
 
-### Shortcut
+### Recording
 
-| Action | Shortcut |
-|--------|----------|
-| Start/Stop recording | **Option+Space** |
+1. Press your configured shortcut (default: **Option+Space**)
+2. Speak your text
+3. Press the shortcut again to stop
+4. Text is automatically pasted at your cursor
 
-### Visual indicators (menu bar)
+### Menu Bar Icons
 
 | Icon | State |
 |------|-------|
 | 🎤 | Idle |
 | 🔴 | Recording |
 | ⏳ | Transcribing |
+
+## macOS Permissions
+
+On first launch, grant these permissions to **Whisper Voice**:
+
+| Permission | Location | Why |
+|------------|----------|-----|
+| Microphone | Privacy → Microphone | Record audio |
+| Accessibility | Privacy → Accessibility | Paste text (Cmd+V) |
+| Input Monitoring | Privacy → Input Monitoring | Global hotkey detection |
+
+## Configuration
+
+Configuration is stored in `~/.whisper-voice-config.json`:
+
+```json
+{
+    "apiKey": "sk-...",
+    "shortcutModifiers": 2048,
+    "shortcutKeyCode": 49
+}
+```
+
+To reconfigure, run `./install.sh` again or edit the JSON file.
 
 ## Uninstallation
 
@@ -79,46 +98,41 @@ Or find it in `~/Applications/` and double-click.
 ```
 
 This removes:
-- The application bundle (`~/Applications/Whisper Voice.app`)
-- The auto-start service
-- Log files
+- The application (`~/Applications/Whisper Voice.app`)
+- Auto-start configuration
+- Optionally, the config file with your API key
 
-## Configuration
-
-The `.env` file contains your API key:
-
-```
-OPENAI_API_KEY=sk-your-key-here
-```
-
-## Logs
+## Building Manually
 
 ```bash
-tail -f ~/.whisper-voice.log
+cd WhisperVoice
+swift build -c release
 ```
 
-## Troubleshooting
-
-### Shortcut not working
-
-Make sure **Whisper Voice** is added in:
-- System Preferences → Privacy & Security → Accessibility
-- System Preferences → Privacy & Security → Input Monitoring
-
-Then restart the app.
-
-### Text not pasting
-
-Add **Whisper Voice** to:
-- System Preferences → Privacy & Security → Automation → System Events
-
-### "This process is not trusted" error
-
-Add **Whisper Voice** to Accessibility preferences, then restart the application.
+The binary will be at `.build/release/WhisperVoice`.
 
 ## Cost
 
-Uses the `gpt-4o-mini-transcribe` model at $0.003/minute (50% cheaper than whisper-1).
+Uses the `gpt-4o-mini-transcribe` model at **$0.003/minute** (50% cheaper than whisper-1).
+
+## Project Structure
+
+```
+whisper-voice/
+├── install.sh              # Installation wizard
+├── uninstall.sh            # Uninstallation script
+├── icons/                  # App and menu bar icons
+│   ├── AppIcon.icns
+│   ├── mic_idle.png
+│   ├── mic_recording.png
+│   └── mic_transcribing.png
+└── WhisperVoice/           # Swift source code
+    ├── Package.swift
+    ├── Info.plist
+    └── Sources/
+        └── WhisperVoice/
+            └── main.swift
+```
 
 ## License
 

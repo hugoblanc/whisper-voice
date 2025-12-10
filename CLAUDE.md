@@ -1,104 +1,86 @@
 # Whisper Voice - Project Context
 
 ## Overview
-macOS voice transcription app using OpenAI's Whisper API. Press **Option+Space** to record, and the transcribed text is automatically pasted at cursor location.
+Native macOS voice transcription app using OpenAI's Whisper API. Press **Option+Space** to record, and the transcribed text is automatically pasted at cursor location.
 
 ## Tech Stack
-- **Python 3.10+**
-- **rumps**: Menu bar app framework
-- **pynput**: Keyboard shortcuts (using `Listener`, not `GlobalHotKeys` - more stable)
-- **sounddevice + scipy**: Audio recording
-- **openai**: Whisper API (`gpt-4o-mini-transcribe` model - 50% cheaper than whisper-1)
+- **Swift 5.9+** (native macOS app)
+- **AVFoundation**: Audio recording
+- **URLSession**: API calls
+- **NSStatusBar**: Menu bar app
+- **CGEvent**: Keyboard simulation for paste
 
 ## Project Structure
 ```
 whisper-voice/
-├── main.py           # Menu bar app + hotkey listener
-├── recorder.py       # Audio recording (16kHz WAV)
-├── transcriber.py    # OpenAI Whisper API calls
-├── clipboard.py      # Paste text via pbcopy + AppleScript Cmd+V
-├── install.sh        # Installation script (creates .app bundle)
-├── uninstall.sh      # Uninstallation script
-├── requirements.txt
-├── .env              # OPENAI_API_KEY (not in git)
-└── .env.example
-```
-
-## Application Bundle
-The install script creates a macOS `.app` bundle for easier permission management:
-```
-~/Applications/Whisper Voice.app/
-├── Contents/
-│   ├── MacOS/
-│   │   └── whisper-voice    # Bash launcher script
-│   ├── Resources/
-│   └── Info.plist
+├── install.sh              # Installation wizard
+├── uninstall.sh            # Uninstallation script
+├── icons/                  # App and menu bar icons
+│   ├── AppIcon.icns
+│   ├── mic_idle.png
+│   └── mic_recording.png
+└── WhisperVoice/           # Swift source code
+    ├── Package.swift       # Swift Package Manager config
+    ├── Info.plist          # macOS app permissions
+    └── Sources/
+        └── WhisperVoice/
+            └── main.swift  # All app code (~350 lines)
 ```
 
 ## Key Implementation Details
 
-### Hotkey Detection (main.py)
-Using `keyboard.Listener` instead of `GlobalHotKeys` to avoid pynput compatibility bugs:
-```python
-def on_press(key):
-    with self.hotkey_lock:
-        self.pressed_keys.add(key)
-        if keyboard.Key.alt in self.pressed_keys and keyboard.Key.space in self.pressed_keys:
-            self.pressed_keys.clear()
-            threading.Thread(target=self.toggle_recording, daemon=True).start()
-```
+### Menu Bar App
+Using `NSStatusBar` with template images that adapt to light/dark mode.
 
-### Paste via AppleScript (clipboard.py)
-Using AppleScript instead of pynput for reliable keystroke simulation:
-```python
-subprocess.run([
-    "osascript", "-e",
-    'tell application "System Events" to keystroke "v" using command down'
-])
-```
+### Global Hotkey
+Using `NSEvent.addGlobalMonitorForEvents` to detect Option+Space globally.
 
-### Menu Bar Icons
-- 🎤 = Idle
-- 🔴 = Recording
-- ⏳ = Transcribing
+### Audio Recording
+Using `AVAudioRecorder` with 16kHz WAV format for Whisper API compatibility.
+
+### Paste via CGEvent
+Using `CGEvent` to simulate Cmd+V keystroke (more reliable than AppleScript for native apps).
 
 ### API Model
 Using `gpt-4o-mini-transcribe` ($0.003/min) instead of `whisper-1` ($0.006/min).
 
-## LaunchAgent (Auto-start)
-Location: `~/Library/LaunchAgents/com.whisper-voice.plist`
-
-Uses `open -a` to launch the app bundle (not direct Python).
-
-Commands:
-```bash
-# Start service
-launchctl load ~/Library/LaunchAgents/com.whisper-voice.plist
-
-# Stop service
-launchctl unload ~/Library/LaunchAgents/com.whisper-voice.plist
-
-# Check status
-launchctl list | grep whisper
-
-# View logs
-tail -f ~/.whisper-voice.log
+## Configuration
+Config file: `~/.whisper-voice-config.json`
+```json
+{
+    "apiKey": "sk-...",
+    "shortcutModifiers": 2048,
+    "shortcutKeyCode": 49
+}
 ```
 
+Modifier values:
+- `2048` = Option
+- `4096` = Control
+- `1310984` = Command + Shift
+
+## Building
+```bash
+cd WhisperVoice
+swift build -c release
+```
+
+## App Bundle Location
+`~/Applications/Whisper Voice.app`
+
 ## macOS Permissions Required
-Add **Whisper Voice** (the .app) in System Preferences → Privacy & Security:
-1. **Accessibility**: For paste simulation (Cmd+V)
-2. **Input Monitoring**: For global hotkey detection
-3. **Automation → System Events**: For AppleScript keystroke simulation
-4. **Microphone**: For audio recording (prompted automatically)
+Add **Whisper Voice** in System Preferences → Privacy & Security:
+1. **Microphone**: For audio recording
+2. **Accessibility**: For paste simulation (Cmd+V)
+3. **Input Monitoring**: For global hotkey detection
 
 ## Common Issues
 
-### "This process is not trusted"
-Add **Whisper Voice** app to Accessibility preferences.
+### App doesn't respond to shortcut
+Add **Whisper Voice** to Input Monitoring and Accessibility.
 
 ### Text not pasting
-Add **Whisper Voice** app to Automation → System Events.
+Add **Whisper Voice** to Accessibility.
 
-### Shortcut not detected
-Add **Whisper Voice** app to Input Monitoring.
+### No microphone prompt
+Restart the app. macOS should prompt for microphone access on first recording.

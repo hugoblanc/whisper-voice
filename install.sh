@@ -2,134 +2,182 @@
 
 set -e
 
-echo "=================================="
-echo "  Whisper Voice - Installation"
-echo "=================================="
-echo ""
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+BOLD='\033[1m'
 
-# Script directory
+# Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-
+PROJECT_DIR="$SCRIPT_DIR/WhisperVoice"
 APP_NAME="Whisper Voice"
 APP_PATH="$HOME/Applications/$APP_NAME.app"
-PLIST_PATH="$HOME/Library/LaunchAgents/com.whisper-voice.plist"
-VERSION="1.1.0"
+CONFIG_PATH="$HOME/.whisper-voice-config.json"
+ICONS_DIR="$SCRIPT_DIR/icons"
 
-# Check Python
-echo "Checking Python..."
-if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}Error: Python 3 is not installed${NC}"
-    echo "Install Python from https://www.python.org/downloads/"
+# Header
+clear
+echo -e "${BLUE}${BOLD}"
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║                                                           ║"
+echo "║             🎤 Whisper Voice - Installation               ║"
+echo "║                      Swift Edition                        ║"
+echo "║                                                           ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo -e "${NC}"
+echo ""
+
+# Step 1: Check Xcode Command Line Tools
+echo -e "${CYAN}[1/5]${NC} Checking build tools..."
+if ! command -v swift &> /dev/null; then
+    echo -e "${YELLOW}Swift not found. Installing Xcode Command Line Tools...${NC}"
+    xcode-select --install
+    echo ""
+    echo -e "${YELLOW}Please complete the installation popup, then run this script again.${NC}"
     exit 1
 fi
-
-PYTHON_PATH=$(which python3)
-PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo -e "${GREEN}✓ Python $PYTHON_VERSION found ($PYTHON_PATH)${NC}"
-
-# Install dependencies
+SWIFT_VERSION=$(swift --version | head -1)
+echo -e "${GREEN}✓${NC} $SWIFT_VERSION"
 echo ""
-echo "Installing dependencies..."
-pip3 install -r requirements.txt --quiet
-echo -e "${GREEN}✓ Dependencies installed${NC}"
 
-# Generate icons if needed
+# Step 2: Configure API Key
+echo -e "${CYAN}[2/5]${NC} OpenAI API Configuration"
 echo ""
-echo "Checking icons..."
-if [ ! -f "$SCRIPT_DIR/icons/AppIcon.icns" ]; then
-    echo "Generating icons..."
-    pip3 install Pillow --quiet
-    python3 "$SCRIPT_DIR/generate_icons.py"
-    echo -e "${GREEN}✓ Icons generated${NC}"
-else
-    echo -e "${GREEN}✓ Icons found${NC}"
+
+CURRENT_KEY=""
+if [ -f "$CONFIG_PATH" ]; then
+    CURRENT_KEY=$(cat "$CONFIG_PATH" 2>/dev/null | grep -o '"apiKey"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
 fi
 
-# Configure API key
-echo ""
-if [ ! -f .env ]; then
-    echo -e "${YELLOW}OpenAI API key configuration${NC}"
-    echo "Get your key at: https://platform.openai.com/api-keys"
+if [ -n "$CURRENT_KEY" ]; then
+    MASKED_KEY="${CURRENT_KEY:0:7}...${CURRENT_KEY: -4}"
+    echo -e "Current API key: ${YELLOW}$MASKED_KEY${NC}"
+    read -p "Keep this key? (Y/n): " KEEP_KEY
+    if [[ "$KEEP_KEY" =~ ^[Nn]$ ]]; then
+        CURRENT_KEY=""
+    fi
+fi
+
+if [ -z "$CURRENT_KEY" ]; then
+    echo ""
+    echo "Get your API key at: https://platform.openai.com/api-keys"
     echo ""
     read -p "Enter your OpenAI API key: " API_KEY
 
     if [ -z "$API_KEY" ]; then
-        echo -e "${RED}Error: API key required${NC}"
+        echo -e "${RED}Error: API key is required${NC}"
         exit 1
     fi
-
-    echo "OPENAI_API_KEY=$API_KEY" > .env
-    echo -e "${GREEN}✓ API key configured${NC}"
 else
-    echo -e "${GREEN}✓ Existing .env file found${NC}"
+    API_KEY="$CURRENT_KEY"
 fi
 
-# Create .app bundle
+echo -e "${GREEN}✓${NC} API key configured"
 echo ""
-echo "Creating application bundle..."
+
+# Step 3: Configure Shortcut
+echo -e "${CYAN}[3/5]${NC} Keyboard Shortcut Configuration"
+echo ""
+echo "Current shortcut: ${BOLD}Option + Space${NC}"
+echo ""
+echo "Available shortcuts:"
+echo "  1) Option + Space (default)"
+echo "  2) Control + Space"
+echo "  3) Command + Shift + Space"
+echo ""
+read -p "Choose shortcut (1-3) [1]: " SHORTCUT_CHOICE
+
+case "$SHORTCUT_CHOICE" in
+    2)
+        MODIFIERS=4096   # controlKey
+        SHORTCUT_DESC="Control + Space"
+        ;;
+    3)
+        MODIFIERS=1310984  # cmdKey + shiftKey
+        SHORTCUT_DESC="Command + Shift + Space"
+        ;;
+    *)
+        MODIFIERS=2048   # optionKey
+        SHORTCUT_DESC="Option + Space"
+        ;;
+esac
+
+echo -e "${GREEN}✓${NC} Shortcut set to: ${BOLD}$SHORTCUT_DESC${NC}"
+echo ""
+
+# Save configuration
+cat > "$CONFIG_PATH" << EOF
+{
+    "apiKey": "$API_KEY",
+    "shortcutModifiers": $MODIFIERS,
+    "shortcutKeyCode": 49
+}
+EOF
+chmod 600 "$CONFIG_PATH"
+
+# Step 4: Build the app
+echo -e "${CYAN}[4/5]${NC} Building application..."
+echo ""
+
+cd "$PROJECT_DIR"
+
+# Build in release mode
+swift build -c release 2>&1 | while read line; do
+    if [[ "$line" == *"error"* ]]; then
+        echo -e "${RED}$line${NC}"
+    elif [[ "$line" == *"warning"* ]]; then
+        echo -e "${YELLOW}$line${NC}"
+    else
+        echo "$line"
+    fi
+done
+
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo -e "${RED}Build failed!${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} Build successful"
+echo ""
+
+# Step 5: Create app bundle
+echo -e "${CYAN}[5/5]${NC} Creating application bundle..."
+
+# Remove old app if exists
+rm -rf "$APP_PATH"
+
+# Create app structure
 mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
 
-# Copy app icon
-if [ -f "$SCRIPT_DIR/icons/AppIcon.icns" ]; then
-    cp "$SCRIPT_DIR/icons/AppIcon.icns" "$APP_PATH/Contents/Resources/"
+# Copy executable
+cp ".build/release/WhisperVoice" "$APP_PATH/Contents/MacOS/WhisperVoice"
+
+# Copy Info.plist
+cp "Info.plist" "$APP_PATH/Contents/"
+
+# Copy icon if exists
+if [ -f "$ICONS_DIR/AppIcon.icns" ]; then
+    cp "$ICONS_DIR/AppIcon.icns" "$APP_PATH/Contents/Resources/"
 fi
 
-# Create executable
-cat > "$APP_PATH/Contents/MacOS/whisper-voice" << EOF
-#!/bin/bash
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
-cd "$SCRIPT_DIR"
-exec $PYTHON_PATH -u main.py 2>&1 | tee -a ~/.whisper-voice.log
-EOF
+# Sign the app
+codesign --force --deep --sign - "$APP_PATH"
 
-chmod +x "$APP_PATH/Contents/MacOS/whisper-voice"
-
-# Create Info.plist with app icon
-cat > "$APP_PATH/Contents/Info.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>whisper-voice</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.whisper-voice</string>
-    <key>CFBundleName</key>
-    <string>Whisper Voice</string>
-    <key>CFBundleDisplayName</key>
-    <string>Whisper Voice</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleVersion</key>
-    <string>$VERSION</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$VERSION</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Whisper Voice needs microphone access to record audio for transcription.</string>
-</dict>
-</plist>
-EOF
-
-echo -e "${GREEN}✓ Application created at ~/Applications/$APP_NAME.app${NC}"
-
-# Auto-start
+echo -e "${GREEN}✓${NC} App installed at: ~/Applications/$APP_NAME.app"
 echo ""
-echo -e "${YELLOW}Do you want Whisper Voice to start automatically at login?${NC}"
-read -p "(y/n): " AUTO_START
 
-if [ "$AUTO_START" = "y" ] || [ "$AUTO_START" = "Y" ] || [ "$AUTO_START" = "yes" ]; then
+# Setup auto-start option
+echo -e "${YELLOW}Do you want Whisper Voice to start automatically at login?${NC}"
+read -p "(y/N): " AUTO_START
+
+if [[ "$AUTO_START" =~ ^[Yy]$ ]]; then
+    PLIST_PATH="$HOME/Library/LaunchAgents/com.whisper-voice.plist"
+
     cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -145,32 +193,44 @@ if [ "$AUTO_START" = "y" ] || [ "$AUTO_START" = "Y" ] || [ "$AUTO_START" = "yes"
     </array>
     <key>RunAtLoad</key>
     <true/>
-    <key>KeepAlive</key>
-    <false/>
 </dict>
 </plist>
 EOF
 
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     launchctl load "$PLIST_PATH"
-
-    echo -e "${GREEN}✓ Auto-start configured${NC}"
+    echo -e "${GREEN}✓${NC} Auto-start enabled"
 fi
 
 echo ""
-echo "=================================="
-echo -e "${GREEN}  Installation complete!${NC}"
-echo "=================================="
+echo -e "${GREEN}${BOLD}"
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║                                                           ║"
+echo "║              ✅ Installation Complete!                    ║"
+echo "║                                                           ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo -e "${NC}"
 echo ""
-echo "To launch:"
-echo "  open -a \"$APP_NAME\""
+echo "To launch the app:"
+echo -e "  ${CYAN}open -a \"Whisper Voice\"${NC}"
 echo ""
-echo "Shortcut: Option+Space"
+echo "Shortcut:"
+echo -e "  ${BOLD}$SHORTCUT_DESC${NC} - Start/Stop recording"
 echo ""
-echo -e "${YELLOW}Important:${NC} Add \"$APP_NAME\" to:"
+echo -e "${YELLOW}Important:${NC} On first launch, macOS will ask for permissions:"
+echo "  • Microphone access"
+echo "  • Accessibility access (for paste)"
+echo ""
+echo "Add ${BOLD}Whisper Voice${NC} to:"
 echo "  System Preferences → Privacy & Security → Accessibility"
 echo "  System Preferences → Privacy & Security → Input Monitoring"
-echo "  System Preferences → Privacy & Security → Automation → System Events"
 echo ""
-echo "Logs: ~/.whisper-voice.log"
+
+# Ask to launch now
+read -p "Launch Whisper Voice now? (Y/n): " LAUNCH_NOW
+if [[ ! "$LAUNCH_NOW" =~ ^[Nn]$ ]]; then
+    open -a "$APP_NAME"
+    echo -e "${GREEN}✓${NC} App launched! Look for the microphone icon in the menu bar."
+fi
+
 echo ""

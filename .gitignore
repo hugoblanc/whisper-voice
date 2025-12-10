@@ -1,15 +1,17 @@
-# Environment
-.env
+# Swift build artifacts
+.build/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+.swiftpm/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-ENV/
-.venv/
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon generation intermediate files
+icons/AppIcon.iconset/
 
 # IDE
 .idea/
@@ -17,16 +19,3 @@ ENV/
 *.swp
 *.swo
 *~
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Temporary files
-*.tmp
-*.temp
-*.wav
-
-# Icon generation intermediate files
-icons/AppIcon.iconset/
