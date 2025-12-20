@@ -1,13 +1,11 @@
 import Cocoa
 import AVFoundation
 import Carbon.HIToolbox
+import os.log
+
+private let logger = Logger(subsystem: "com.whispervoice", category: "main")
 
 // MARK: - Configuration
-
-enum RecordingMode: String {
-    case toggle = "toggle"
-    case pushToTalk = "pushToTalk"
-}
 
 struct Config {
     static let configPath = FileManager.default.homeDirectoryForCurrentUser
@@ -16,7 +14,6 @@ struct Config {
     var apiKey: String
     var shortcutModifiers: UInt32  // e.g., optionKey
     var shortcutKeyCode: UInt32    // e.g., kVK_Space
-    var recordingMode: RecordingMode
     var pushToTalkKeyCode: UInt32  // e.g., kVK_F3
 
     static func load() -> Config? {
@@ -28,15 +25,12 @@ struct Config {
 
         let modifiers = json["shortcutModifiers"] as? UInt32 ?? UInt32(optionKey)
         let keyCode = json["shortcutKeyCode"] as? UInt32 ?? UInt32(kVK_Space)
-        let modeStr = json["recordingMode"] as? String ?? "toggle"
-        let mode = RecordingMode(rawValue: modeStr) ?? .toggle
         let pttKeyCode = json["pushToTalkKeyCode"] as? UInt32 ?? UInt32(kVK_F3)
 
         return Config(
             apiKey: apiKey,
             shortcutModifiers: modifiers,
             shortcutKeyCode: keyCode,
-            recordingMode: mode,
             pushToTalkKeyCode: pttKeyCode
         )
     }
@@ -46,7 +40,6 @@ struct Config {
             "apiKey": apiKey,
             "shortcutModifiers": shortcutModifiers,
             "shortcutKeyCode": shortcutKeyCode,
-            "recordingMode": recordingMode.rawValue,
             "pushToTalkKeyCode": pushToTalkKeyCode
         ]
         if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
@@ -54,11 +47,7 @@ struct Config {
         }
     }
 
-    func shortcutDescription() -> String {
-        if recordingMode == .pushToTalk {
-            return keyCodeToString(pushToTalkKeyCode) + " (hold)"
-        }
-
+    func toggleShortcutDescription() -> String {
         var parts: [String] = []
         if shortcutModifiers & UInt32(cmdKey) != 0 { parts.append("Cmd") }
         if shortcutModifiers & UInt32(shiftKey) != 0 { parts.append("Shift") }
@@ -66,6 +55,10 @@ struct Config {
         if shortcutModifiers & UInt32(controlKey) != 0 { parts.append("Control") }
         parts.append(keyCodeToString(shortcutKeyCode))
         return parts.joined(separator: "+")
+    }
+
+    func pushToTalkDescription() -> String {
+        return keyCodeToString(pushToTalkKeyCode) + " (hold)"
     }
 }
 
@@ -144,7 +137,33 @@ class WhisperAPI {
         self.apiKey = apiKey
     }
 
+    private func createSession() -> URLSession {
+        // Create fresh session for each request to avoid stale connections
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }
+
     func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        transcribeWithRetry(audioURL: audioURL, attempt: 1, maxAttempts: 3, completion: completion)
+    }
+
+    private func transcribeWithRetry(audioURL: URL, attempt: Int, maxAttempts: Int, completion: @escaping (Result<String, Error>) -> Void) {
+        logger.info("Starting transcription attempt \(attempt)/\(maxAttempts) for file: \(audioURL.lastPathComponent)")
+
+        // Check file size
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: audioURL.path),
+           let fileSize = attrs[.size] as? Int {
+            logger.info("Audio file size: \(fileSize) bytes")
+            if fileSize < 1000 {
+                logger.warning("Audio file too small, likely empty recording")
+                completion(.failure(NSError(domain: "WhisperAPI", code: -3, userInfo: [NSLocalizedDescriptionKey: "Recording too short"])))
+                return
+            }
+        }
+
         let url = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -172,13 +191,43 @@ class WhisperAPI {
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        logger.info("Sending request to Whisper API (attempt \(attempt))...")
+
+        let session = createSession()
+        session.dataTask(with: request) { [weak self] data, response, error in
+            // Invalidate session after use
+            session.invalidateAndCancel()
+
             if let error = error {
-                completion(.failure(error))
+                logger.error("API request failed (attempt \(attempt)): \(error.localizedDescription)")
+
+                // Retry if we have attempts left
+                if attempt < maxAttempts {
+                    logger.info("Retrying in 1 second...")
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                        self?.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
+                    }
+                } else {
+                    completion(.failure(error))
+                }
                 return
             }
 
+            if let httpResponse = response as? HTTPURLResponse {
+                logger.info("API response status: \(httpResponse.statusCode)")
+
+                // Retry on server errors (5xx)
+                if httpResponse.statusCode >= 500 && attempt < maxAttempts {
+                    logger.info("Server error, retrying in 1 second...")
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                        self?.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
+                    }
+                    return
+                }
+            }
+
             guard let data = data else {
+                logger.error("No data received from API")
                 completion(.failure(NSError(domain: "WhisperAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "No data received"])))
                 return
             }
@@ -186,12 +235,15 @@ class WhisperAPI {
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let text = json["text"] as? String {
+                    logger.info("Transcription successful: \(text.prefix(50))...")
                     completion(.success(text))
                 } else {
                     let responseStr = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    logger.error("API error response: \(responseStr)")
                     completion(.failure(NSError(domain: "WhisperAPI", code: -2, userInfo: [NSLocalizedDescriptionKey: responseStr])))
                 }
             } catch {
+                logger.error("JSON parsing error: \(error.localizedDescription)")
                 completion(.failure(error))
             }
         }.resume()
@@ -229,14 +281,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var audioRecorder = AudioRecorder()
     private var whisperAPI: WhisperAPI?
     private var config: Config?
-    private var globalEventMonitor: Any?
-    private var localEventMonitor: Any?
-    private var flagsEventMonitor: Any?
+
+    // Toggle mode monitors
+    private var toggleGlobalMonitor: Any?
+    private var toggleLocalMonitor: Any?
+
+    // Push-to-talk monitors
+    private var pttGlobalKeyDownMonitor: Any?
+    private var pttGlobalKeyUpMonitor: Any?
+    private var pttLocalMonitor: Any?
 
     private enum AppState {
         case idle, recording, transcribing
     }
     private var state: AppState = .idle
+    private var isPushToTalkActive = false  // Track if current recording is from PTT
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Load config
@@ -254,33 +313,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create menu
         let menu = NSMenu()
 
-        let shortcutDesc = config.shortcutDescription()
-        menu.addItem(NSMenuItem(title: "\(shortcutDesc) to record", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "\(config.toggleShortcutDescription()) to toggle", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "\(config.pushToTalkDescription()) to record", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-
-        let modeDesc = config.recordingMode == .pushToTalk ? "Push-to-Talk" : "Toggle"
-        let modeMenuItem = NSMenuItem(title: "Mode: \(modeDesc)", action: nil, keyEquivalent: "")
-        modeMenuItem.tag = 101
-        menu.addItem(modeMenuItem)
 
         let statusMenuItem = NSMenuItem(title: "Status: Idle", action: nil, keyEquivalent: "")
         statusMenuItem.tag = 100
         menu.addItem(statusMenuItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Version 2.1.0", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Version 2.2.0", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem.menu = menu
 
-        // Setup hotkeys based on mode
-        if config.recordingMode == .pushToTalk {
-            setupPushToTalkHotkey()
-        } else {
-            setupToggleHotkey()
-        }
+        // Setup both hotkeys (toggle + push-to-talk)
+        setupToggleHotkey()
+        setupPushToTalkHotkey()
 
-        print("Whisper Voice started (mode: \(config.recordingMode.rawValue))")
+        print("Whisper Voice started (dual mode: toggle + push-to-talk)")
     }
 
     private func showConfigError() {
@@ -319,10 +370,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Toggle Mode (press to start, press again to stop)
 
     private func setupToggleHotkey() {
-        guard let config = config else { return }
+        guard config != nil else { return }
 
         // Global monitor for key down
-        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        toggleGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if self?.matchesToggleShortcut(event) == true {
                 DispatchQueue.main.async {
                     self?.toggleRecording()
@@ -331,7 +382,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Local monitor for key down
-        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        toggleLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if self?.matchesToggleShortcut(event) == true {
                 DispatchQueue.main.async {
                     self?.toggleRecording()
@@ -370,9 +421,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func toggleRecording() {
         switch state {
         case .idle:
+            isPushToTalkActive = false
             startRecording(showStopMessage: true)
         case .recording:
-            stopRecording()
+            // Only stop if not in PTT mode (PTT uses key release to stop)
+            if !isPushToTalkActive {
+                stopRecording()
+            }
         case .transcribing:
             break
         }
@@ -385,7 +440,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let pttKeyCode = UInt16(config.pushToTalkKeyCode)
 
         // Global monitor for key down (start recording)
-        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        pttGlobalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == pttKeyCode && !event.isARepeat {
                 DispatchQueue.main.async {
                     self?.startPushToTalk()
@@ -394,7 +449,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Global monitor for key up (stop recording)
-        flagsEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyUp) { [weak self] event in
+        pttGlobalKeyUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyUp) { [weak self] event in
             if event.keyCode == pttKeyCode {
                 DispatchQueue.main.async {
                     self?.stopPushToTalk()
@@ -403,7 +458,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Local monitors
-        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+        pttLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             if event.keyCode == pttKeyCode {
                 DispatchQueue.main.async {
                     if event.type == .keyDown && !event.isARepeat {
@@ -420,18 +475,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startPushToTalk() {
         guard state == .idle else { return }
+        isPushToTalkActive = true
         startRecording(showStopMessage: false)
     }
 
     private func stopPushToTalk() {
-        guard state == .recording else { return }
+        guard state == .recording && isPushToTalkActive else { return }
+        isPushToTalkActive = false
         stopRecording()
     }
 
     // MARK: - Recording
 
+    private var transcriptionTimeoutTimer: Timer?
+
     private func startRecording(showStopMessage: Bool) {
+        logger.info("Starting recording (showStopMessage: \(showStopMessage))")
+
         guard audioRecorder.startRecording() else {
+            logger.error("Failed to start recording")
             showNotification(title: "Error", message: "Failed to start recording")
             return
         }
@@ -441,7 +503,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatus("Recording...")
 
         if showStopMessage {
-            let shortcut = config?.shortcutDescription() ?? "shortcut"
+            let shortcut = config?.toggleShortcutDescription() ?? "shortcut"
             showNotification(title: "Recording", message: "\(shortcut) to stop")
         } else {
             showNotification(title: "Recording", message: "Release key to stop")
@@ -449,7 +511,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopRecording() {
+        logger.info("Stopping recording")
+
         guard let audioURL = audioRecorder.stopRecording() else {
+            logger.warning("No audio URL returned from stopRecording")
             state = .idle
             updateStatusIcon()
             updateStatus("Idle")
@@ -460,15 +525,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusIcon()
         updateStatus("Transcribing...")
 
+        // Safety timeout: reset state after 45 seconds if still transcribing
+        transcriptionTimeoutTimer?.invalidate()
+        transcriptionTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 45.0, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                if self?.state == .transcribing {
+                    logger.error("Transcription timeout - resetting state")
+                    self?.audioRecorder.cleanup()
+                    self?.showNotification(title: "Error", message: "Transcription timeout")
+                    self?.state = .idle
+                    self?.updateStatusIcon()
+                    self?.updateStatus("Idle")
+                }
+            }
+        }
+
         whisperAPI?.transcribe(audioURL: audioURL) { [weak self] result in
             DispatchQueue.main.async {
+                // Cancel safety timeout
+                self?.transcriptionTimeoutTimer?.invalidate()
+                self?.transcriptionTimeoutTimer = nil
+
                 self?.audioRecorder.cleanup()
 
                 switch result {
                 case .success(let text):
+                    logger.info("Transcription complete, pasting text")
                     pasteText(text)
                     self?.showNotification(title: "Transcription Complete", message: String(text.prefix(50)))
                 case .failure(let error):
+                    logger.error("Transcription failed: \(error.localizedDescription)")
                     self?.showNotification(title: "Error", message: error.localizedDescription)
                 }
 

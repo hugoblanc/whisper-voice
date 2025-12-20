@@ -24,7 +24,7 @@ clear
 echo -e "${BLUE}${BOLD}"
 echo "========================================"
 echo "    Whisper Voice - Installation        "
-echo "         Swift Edition v2.1.0           "
+echo "         Swift Edition v2.2.0           "
 echo "========================================"
 echo -e "${NC}"
 echo ""
@@ -77,84 +77,68 @@ fi
 echo -e "${GREEN}OK${NC} API key configured"
 echo ""
 
-# Step 3: Configure Recording Mode
-echo -e "${CYAN}[3/5]${NC} Recording Mode Configuration"
+# Step 3: Configure Shortcuts
+echo -e "${CYAN}[3/5]${NC} Keyboard Shortcuts Configuration"
 echo ""
-echo "Choose how you want to control recording:"
+echo "Both modes are enabled simultaneously:"
+echo "  - Toggle mode: Press to start, press again to stop"
+echo "  - Push-to-Talk: Hold to record, release to transcribe"
 echo ""
-echo "  1) Toggle mode (default)"
-echo "     Press shortcut to start, press again to stop"
+
+# Configure toggle shortcut
+echo -e "${YELLOW}Toggle mode shortcut:${NC}"
+echo "  1) Option + Space (default)"
+echo "  2) Control + Space"
+echo "  3) Command + Shift + Space"
 echo ""
-echo "  2) Push-to-Talk mode"
-echo "     Hold key to record, release to transcribe"
+read -p "Choose shortcut (1-3) [1]: " SHORTCUT_CHOICE
+
+case "$SHORTCUT_CHOICE" in
+    2)
+        MODIFIERS=4096   # controlKey
+        TOGGLE_DESC="Control + Space"
+        ;;
+    3)
+        MODIFIERS=1310984  # cmdKey + shiftKey
+        TOGGLE_DESC="Command + Shift + Space"
+        ;;
+    *)
+        MODIFIERS=2048   # optionKey
+        TOGGLE_DESC="Option + Space"
+        ;;
+esac
+KEYCODE=49  # Space
+
+echo -e "${GREEN}OK${NC} Toggle: ${BOLD}$TOGGLE_DESC${NC}"
+
+# Configure push-to-talk key
 echo ""
-read -p "Choose mode (1-2) [1]: " MODE_CHOICE
-
-if [[ "$MODE_CHOICE" == "2" ]]; then
-    RECORDING_MODE="pushToTalk"
-
-    echo ""
-    echo "Choose Push-to-Talk key:"
-    echo "  1) F1       5) F5       9) F9"
-    echo "  2) F2       6) F6      10) F10"
-    echo "  3) F3       7) F7      11) F11"
-    echo "  4) F4       8) F8      12) F12"
-    echo ""
-    read -p "Choose key (1-12) [3]: " PTT_CHOICE
-
-    case "$PTT_CHOICE" in
-        1)  PTT_KEYCODE=122; PTT_DESC="F1" ;;
-        2)  PTT_KEYCODE=120; PTT_DESC="F2" ;;
-        4)  PTT_KEYCODE=118; PTT_DESC="F4" ;;
-        5)  PTT_KEYCODE=96;  PTT_DESC="F5" ;;
-        6)  PTT_KEYCODE=97;  PTT_DESC="F6" ;;
-        7)  PTT_KEYCODE=98;  PTT_DESC="F7" ;;
-        8)  PTT_KEYCODE=100; PTT_DESC="F8" ;;
-        9)  PTT_KEYCODE=101; PTT_DESC="F9" ;;
-        10) PTT_KEYCODE=109; PTT_DESC="F10" ;;
-        11) PTT_KEYCODE=103; PTT_DESC="F11" ;;
-        12) PTT_KEYCODE=111; PTT_DESC="F12" ;;
-        *)  PTT_KEYCODE=99;  PTT_DESC="F3" ;;
-    esac
-
-    SHORTCUT_DESC="$PTT_DESC (hold)"
-    # Set default toggle shortcut values (not used in PTT mode but needed for config)
-    MODIFIERS=2048
-    KEYCODE=49
-
-    echo -e "${GREEN}OK${NC} Push-to-Talk mode with ${BOLD}$PTT_DESC${NC}"
-else
-    RECORDING_MODE="toggle"
-    PTT_KEYCODE=99  # F3 default
-
-    echo ""
-    echo "Choose keyboard shortcut:"
-    echo "  1) Option + Space (default)"
-    echo "  2) Control + Space"
-    echo "  3) Command + Shift + Space"
-    echo ""
-    read -p "Choose shortcut (1-3) [1]: " SHORTCUT_CHOICE
-
-    case "$SHORTCUT_CHOICE" in
-        2)
-            MODIFIERS=4096   # controlKey
-            SHORTCUT_DESC="Control + Space"
-            ;;
-        3)
-            MODIFIERS=1310984  # cmdKey + shiftKey
-            SHORTCUT_DESC="Command + Shift + Space"
-            ;;
-        *)
-            MODIFIERS=2048   # optionKey
-            SHORTCUT_DESC="Option + Space"
-            ;;
-    esac
-    KEYCODE=49  # Space
-
-    echo -e "${GREEN}OK${NC} Toggle mode with ${BOLD}$SHORTCUT_DESC${NC}"
-fi
-
+echo -e "${YELLOW}Push-to-Talk key:${NC}"
+echo "  1) F1       5) F5       9) F9"
+echo "  2) F2       6) F6      10) F10"
+echo "  3) F3       7) F7      11) F11"
+echo "  4) F4       8) F8      12) F12"
 echo ""
+read -p "Choose key (1-12) [3]: " PTT_CHOICE
+
+case "$PTT_CHOICE" in
+    1)  PTT_KEYCODE=122; PTT_DESC="F1" ;;
+    2)  PTT_KEYCODE=120; PTT_DESC="F2" ;;
+    4)  PTT_KEYCODE=118; PTT_DESC="F4" ;;
+    5)  PTT_KEYCODE=96;  PTT_DESC="F5" ;;
+    6)  PTT_KEYCODE=97;  PTT_DESC="F6" ;;
+    7)  PTT_KEYCODE=98;  PTT_DESC="F7" ;;
+    8)  PTT_KEYCODE=100; PTT_DESC="F8" ;;
+    9)  PTT_KEYCODE=101; PTT_DESC="F9" ;;
+    10) PTT_KEYCODE=109; PTT_DESC="F10" ;;
+    11) PTT_KEYCODE=103; PTT_DESC="F11" ;;
+    12) PTT_KEYCODE=111; PTT_DESC="F12" ;;
+    *)  PTT_KEYCODE=99;  PTT_DESC="F3" ;;
+esac
+
+echo -e "${GREEN}OK${NC} Push-to-Talk: ${BOLD}$PTT_DESC${NC} (hold)
+
+"
 
 # Save configuration
 cat > "$CONFIG_PATH" << EOF
@@ -162,7 +146,6 @@ cat > "$CONFIG_PATH" << EOF
     "apiKey": "$API_KEY",
     "shortcutModifiers": $MODIFIERS,
     "shortcutKeyCode": $KEYCODE,
-    "recordingMode": "$RECORDING_MODE",
     "pushToTalkKeyCode": $PTT_KEYCODE
 }
 EOF
@@ -261,13 +244,9 @@ echo ""
 echo "To launch the app:"
 echo -e "  ${CYAN}open -a \"Whisper Voice\"${NC}"
 echo ""
-if [[ "$RECORDING_MODE" == "pushToTalk" ]]; then
-    echo "Mode: ${BOLD}Push-to-Talk${NC}"
-    echo -e "  Hold ${BOLD}$PTT_DESC${NC} to record, release to transcribe"
-else
-    echo "Mode: ${BOLD}Toggle${NC}"
-    echo -e "  ${BOLD}$SHORTCUT_DESC${NC} to start/stop recording"
-fi
+echo -e "${BOLD}Two recording modes available:${NC}"
+echo -e "  Toggle: ${BOLD}$TOGGLE_DESC${NC} to start/stop"
+echo -e "  PTT:    Hold ${BOLD}$PTT_DESC${NC} to record"
 echo ""
 echo -e "${YELLOW}Important:${NC} On first launch, macOS will ask for permissions:"
 echo "  - Microphone access"
