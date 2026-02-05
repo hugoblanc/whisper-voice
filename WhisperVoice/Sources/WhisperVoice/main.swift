@@ -298,13 +298,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isPushToTalkActive = false  // Track if current recording is from PTT
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Load config
-        guard let config = Config.load() else {
+        // Load config or show setup wizard
+        if let config = Config.load() {
+            self.config = config
+            self.whisperAPI = WhisperAPI(apiKey: config.apiKey)
+            setupStatusBar()
+        } else {
             showConfigError()
-            return
         }
-        self.config = config
-        self.whisperAPI = WhisperAPI(apiKey: config.apiKey)
+    }
+
+    private func showConfigError() {
+        // Show setup wizard instead of error
+        if let config = showSetupWizard() {
+            self.config = config
+            self.whisperAPI = WhisperAPI(apiKey: config.apiKey)
+            setupStatusBar()
+        } else {
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func setupStatusBar() {
+        guard let config = config else { return }
 
         // Create status bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -334,14 +350,160 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("Whisper Voice started (dual mode: toggle + push-to-talk)")
     }
 
-    private func showConfigError() {
+    private func showSetupWizard() -> Config? {
         let alert = NSAlert()
-        alert.messageText = "Configuration Required"
-        alert.informativeText = "Please run the install script first:\n./install.sh"
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Quit")
-        alert.runModal()
-        NSApp.terminate(nil)
+        alert.messageText = "Whisper Voice Setup"
+        alert.informativeText = "Configure your voice transcription settings"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save & Start")
+        alert.addButton(withTitle: "Cancel")
+
+        // Create accessory view for inputs
+        let accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 350, height: 200))
+
+        // API Key label
+        let apiKeyLabel = NSTextField(labelWithString: "OpenAI API Key:")
+        apiKeyLabel.frame = NSRect(x: 0, y: 170, width: 350, height: 20)
+        accessoryView.addSubview(apiKeyLabel)
+
+        // API Key field
+        let apiKeyField = NSSecureTextField(frame: NSRect(x: 0, y: 145, width: 350, height: 24))
+        apiKeyField.placeholderString = "sk-..."
+        accessoryView.addSubview(apiKeyField)
+
+        // API Key link
+        let linkButton = NSButton(frame: NSRect(x: 0, y: 120, width: 250, height: 20))
+        linkButton.title = "Get your API key from platform.openai.com"
+        linkButton.bezelStyle = .inline
+        linkButton.isBordered = false
+        linkButton.attributedTitle = NSAttributedString(
+            string: linkButton.title,
+            attributes: [.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        )
+        linkButton.target = self
+        linkButton.action = #selector(openAPIKeyPage)
+        accessoryView.addSubview(linkButton)
+
+        // Toggle shortcut label
+        let shortcutLabel = NSTextField(labelWithString: "Toggle Shortcut:")
+        shortcutLabel.frame = NSRect(x: 0, y: 85, width: 150, height: 20)
+        accessoryView.addSubview(shortcutLabel)
+
+        // Toggle shortcut popup
+        let shortcutPopup = NSPopUpButton(frame: NSRect(x: 0, y: 60, width: 160, height: 24))
+        shortcutPopup.addItems(withTitles: ["Option+Space", "Control+Space", "Cmd+Shift+Space"])
+        shortcutPopup.selectItem(at: 0)
+        accessoryView.addSubview(shortcutPopup)
+
+        // PTT key label
+        let pttLabel = NSTextField(labelWithString: "Push-to-Talk Key:")
+        pttLabel.frame = NSRect(x: 180, y: 85, width: 150, height: 20)
+        accessoryView.addSubview(pttLabel)
+
+        // PTT key popup
+        let pttPopup = NSPopUpButton(frame: NSRect(x: 180, y: 60, width: 160, height: 24))
+        pttPopup.addItems(withTitles: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"])
+        pttPopup.selectItem(at: 2) // F3 default
+        accessoryView.addSubview(pttPopup)
+
+        // Auto-start checkbox
+        let autoStartCheck = NSButton(checkboxWithTitle: "Start at login", target: nil, action: nil)
+        autoStartCheck.frame = NSRect(x: 0, y: 20, width: 200, height: 20)
+        accessoryView.addSubview(autoStartCheck)
+
+        alert.accessoryView = accessoryView
+
+        // Show dialog
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if apiKey.isEmpty {
+                let errorAlert = NSAlert()
+                errorAlert.messageText = "API Key Required"
+                errorAlert.informativeText = "Please enter your OpenAI API key."
+                errorAlert.alertStyle = .warning
+                errorAlert.runModal()
+                return showSetupWizard() // Retry
+            }
+
+            if !apiKey.hasPrefix("sk-") {
+                let errorAlert = NSAlert()
+                errorAlert.messageText = "Invalid API Key"
+                errorAlert.informativeText = "API key should start with 'sk-'"
+                errorAlert.alertStyle = .warning
+                errorAlert.runModal()
+                return showSetupWizard() // Retry
+            }
+
+            // Parse shortcut
+            let modifiers: UInt32
+            switch shortcutPopup.indexOfSelectedItem {
+            case 1: modifiers = UInt32(controlKey)
+            case 2: modifiers = UInt32(cmdKey | shiftKey)
+            default: modifiers = UInt32(optionKey)
+            }
+
+            // Parse PTT key
+            let pttKeyCodes: [UInt32] = [
+                UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
+                UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
+                UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
+            ]
+            let pttKeyCode = pttKeyCodes[pttPopup.indexOfSelectedItem]
+
+            let config = Config(
+                apiKey: apiKey,
+                shortcutModifiers: modifiers,
+                shortcutKeyCode: UInt32(kVK_Space),
+                pushToTalkKeyCode: pttKeyCode
+            )
+            config.save()
+
+            // Setup auto-start if checked
+            if autoStartCheck.state == .on {
+                setupAutoStart()
+            }
+
+            return config
+        }
+
+        return nil
+    }
+
+    @objc private func openAPIKeyPage() {
+        if let url = URL(string: "https://platform.openai.com/api-keys") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func setupAutoStart() {
+        let plistPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.whisper-voice.plist")
+
+        let appPath = Bundle.main.bundlePath
+
+        let plistContent = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.whisper-voice</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>/usr/bin/open</string>
+                <string>-a</string>
+                <string>\(appPath)</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+        </dict>
+        </plist>
+        """
+
+        try? plistContent.write(to: plistPath, atomically: true, encoding: .utf8)
     }
 
     private func updateStatusIcon() {
