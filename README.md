@@ -4,6 +4,8 @@
 
 Native Swift app using OpenAI's Whisper API. No dependencies, lightweight (~2 MB).
 
+**Windows user?** Check out [whisper-voice-windows](https://github.com/hugoblanc/whisper-voice-windows).
+
 ## Quick Start
 
 ```bash
