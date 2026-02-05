@@ -41,5 +41,12 @@ if [ -f "$CONFIG_PATH" ]; then
     fi
 fi
 
+# Remove logs
+LOGS_PATH="$HOME/Library/Application Support/WhisperVoice"
+if [ -d "$LOGS_PATH" ]; then
+    rm -rf "$LOGS_PATH"
+    echo -e "${GREEN}✓${NC} Logs removed"
+fi
+
 echo ""
 echo -e "${GREEN}Uninstallation complete!${NC}"

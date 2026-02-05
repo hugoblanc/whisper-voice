@@ -1,9 +1,1030 @@
 import Cocoa
 import AVFoundation
 import Carbon.HIToolbox
+import ApplicationServices
 import os.log
 
 private let logger = Logger(subsystem: "com.whispervoice", category: "main")
+
+// MARK: - Log Manager
+
+class LogManager {
+    static let shared = LogManager()
+
+    private let logFileURL: URL
+    private var logEntries: [String] = []
+    private let maxLogEntries = 1000
+    private let queue = DispatchQueue(label: "com.whispervoice.logmanager")
+
+    private init() {
+        // Create Application Support directory if needed
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/WhisperVoice")
+        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+
+        logFileURL = appSupport.appendingPathComponent("logs.txt")
+
+        // Load existing logs
+        loadLogs()
+    }
+
+    private func loadLogs() {
+        queue.sync {
+            if let contents = try? String(contentsOf: logFileURL, encoding: .utf8) {
+                logEntries = contents.components(separatedBy: "\n").filter { !$0.isEmpty }
+                // Keep only recent entries
+                if logEntries.count > maxLogEntries {
+                    logEntries = Array(logEntries.suffix(maxLogEntries))
+                }
+            }
+        }
+    }
+
+    func log(_ message: String, level: String = "INFO") {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let timestamp = dateFormatter.string(from: Date())
+        let entry = "\(timestamp) [\(level)] \(message)"
+
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            self.logEntries.append(entry)
+
+            // Trim if too many entries
+            if self.logEntries.count > self.maxLogEntries {
+                self.logEntries = Array(self.logEntries.suffix(self.maxLogEntries))
+            }
+
+            // Write to file
+            let content = self.logEntries.joined(separator: "\n")
+            try? content.write(to: self.logFileURL, atomically: true, encoding: .utf8)
+        }
+
+        // Also log to os.log
+        switch level {
+        case "ERROR":
+            logger.error("\(message)")
+        case "WARNING":
+            logger.warning("\(message)")
+        default:
+            logger.info("\(message)")
+        }
+    }
+
+    func getRecentLogs(count: Int = 100) -> [String] {
+        return queue.sync {
+            return Array(logEntries.suffix(count))
+        }
+    }
+
+    func clearLogs() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.logEntries.removeAll()
+            try? "".write(to: self.logFileURL, atomically: true, encoding: .utf8)
+        }
+    }
+}
+
+// MARK: - Permission Types
+
+enum PermissionType: Int, CaseIterable {
+    case microphone = 0
+    case accessibility = 1
+    case inputMonitoring = 2
+
+    var title: String {
+        switch self {
+        case .microphone: return "Microphone Access"
+        case .accessibility: return "Accessibility"
+        case .inputMonitoring: return "Input Monitoring"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .microphone:
+            return "Whisper Voice needs microphone access to record your voice for transcription."
+        case .accessibility:
+            return "Whisper Voice needs Accessibility access to paste transcribed text using Cmd+V."
+        case .inputMonitoring:
+            return "Whisper Voice needs Input Monitoring access to detect global keyboard shortcuts."
+        }
+    }
+
+    var systemPreferencesURL: URL {
+        let baseURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_"
+        switch self {
+        case .microphone:
+            return URL(string: baseURL + "Microphone")!
+        case .accessibility:
+            return URL(string: baseURL + "Accessibility")!
+        case .inputMonitoring:
+            return URL(string: baseURL + "ListenEvent")!
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .microphone: return "mic.fill"
+        case .accessibility: return "hand.raised.fill"
+        case .inputMonitoring: return "keyboard"
+        }
+    }
+}
+
+// MARK: - Permission Checker
+
+class PermissionChecker {
+
+    static func checkMicrophonePermission() -> Bool {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        return status == .authorized
+    }
+
+    static func checkAccessibilityPermission() -> Bool {
+        return AXIsProcessTrusted()
+    }
+
+    static func checkInputMonitoringPermission() -> Bool {
+        // Input Monitoring can be tested by attempting to add a global event monitor
+        // If the permission is not granted, the monitor will fail silently
+        // We use a heuristic: if accessibility is granted, input monitoring usually works
+        // But the definitive test is trying to create a monitor
+
+        // Note: There's no direct API to check Input Monitoring permission
+        // The best we can do is check if we can successfully monitor events
+        // For now, we assume if Accessibility is granted, we should prompt for Input Monitoring too
+        // macOS will show its own dialog when we try to use it
+
+        // Try to create a test monitor
+        var hasPermission = false
+        let testMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { _ in }
+        if testMonitor != nil {
+            hasPermission = true
+            NSEvent.removeMonitor(testMonitor!)
+        }
+        return hasPermission
+    }
+
+    static func checkPermission(_ type: PermissionType) -> Bool {
+        switch type {
+        case .microphone:
+            return checkMicrophonePermission()
+        case .accessibility:
+            return checkAccessibilityPermission()
+        case .inputMonitoring:
+            return checkInputMonitoringPermission()
+        }
+    }
+
+    static func allPermissionsGranted() -> Bool {
+        return PermissionType.allCases.allSatisfy { checkPermission($0) }
+    }
+
+    static func missingPermissions() -> [PermissionType] {
+        return PermissionType.allCases.filter { !checkPermission($0) }
+    }
+
+    static func requestMicrophonePermission(completion: @escaping (Bool) -> Void) {
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            DispatchQueue.main.async {
+                completion(granted)
+            }
+        }
+    }
+
+    static func promptAccessibilityPermission() {
+        // This will show the system dialog asking user to grant accessibility access
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        AXIsProcessTrustedWithOptions(options as CFDictionary)
+    }
+}
+
+// MARK: - Permission Wizard
+
+class PermissionWizard: NSObject, NSWindowDelegate {
+    private var window: NSWindow!
+    private var currentStep: Int = 0
+    private var permissionsToRequest: [PermissionType] = []
+    private var pollingTimer: Timer?
+    private var onComplete: (() -> Void)?
+
+    // UI Elements
+    private var progressDots: [NSView] = []
+    private var iconImageView: NSImageView!
+    private var stepLabel: NSTextField!
+    private var titleLabel: NSTextField!
+    private var explanationLabel: NSTextField!
+    private var statusLabel: NSTextField!
+    private var openPrefsButton: NSButton!
+    private var skipButton: NSButton!
+    private var nextButton: NSButton!
+
+    init(permissionsToRequest: [PermissionType], onComplete: @escaping () -> Void) {
+        super.init()
+        self.permissionsToRequest = permissionsToRequest
+        self.onComplete = onComplete
+        setupWindow()
+    }
+
+    private func setupWindow() {
+        // Create window
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 360),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Whisper Voice Setup"
+        window.center()
+        window.delegate = self
+        window.isReleasedWhenClosed = false
+
+        guard let contentView = window.contentView else { return }
+        contentView.wantsLayer = true
+
+        // Progress dots container
+        let dotsContainer = NSView(frame: NSRect(x: 0, y: 300, width: 480, height: 30))
+        contentView.addSubview(dotsContainer)
+
+        let totalDots = permissionsToRequest.count
+        let dotSize: CGFloat = 12
+        let dotSpacing: CGFloat = 20
+        let totalWidth = CGFloat(totalDots) * dotSize + CGFloat(totalDots - 1) * dotSpacing
+        var dotX = (480 - totalWidth) / 2
+
+        for i in 0..<totalDots {
+            let dot = NSView(frame: NSRect(x: dotX, y: 9, width: dotSize, height: dotSize))
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = dotSize / 2
+            dot.layer?.backgroundColor = (i == 0 ? NSColor.systemBlue : NSColor.systemGray).cgColor
+            dotsContainer.addSubview(dot)
+            progressDots.append(dot)
+            dotX += dotSize + dotSpacing
+        }
+
+        // Icon
+        iconImageView = NSImageView(frame: NSRect(x: 200, y: 220, width: 80, height: 80))
+        iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        contentView.addSubview(iconImageView)
+
+        // Step label
+        stepLabel = NSTextField(labelWithString: "")
+        stepLabel.frame = NSRect(x: 0, y: 190, width: 480, height: 20)
+        stepLabel.alignment = .center
+        stepLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        stepLabel.textColor = .secondaryLabelColor
+        contentView.addSubview(stepLabel)
+
+        // Title label
+        titleLabel = NSTextField(labelWithString: "")
+        titleLabel.frame = NSRect(x: 40, y: 160, width: 400, height: 24)
+        titleLabel.alignment = .center
+        titleLabel.font = NSFont.systemFont(ofSize: 18, weight: .semibold)
+        contentView.addSubview(titleLabel)
+
+        // Explanation label
+        explanationLabel = NSTextField(wrappingLabelWithString: "")
+        explanationLabel.frame = NSRect(x: 40, y: 110, width: 400, height: 40)
+        explanationLabel.alignment = .center
+        explanationLabel.font = NSFont.systemFont(ofSize: 13)
+        explanationLabel.textColor = .secondaryLabelColor
+        contentView.addSubview(explanationLabel)
+
+        // Open System Preferences button
+        openPrefsButton = NSButton(title: "Open System Preferences", target: self, action: #selector(openSystemPreferences))
+        openPrefsButton.bezelStyle = .rounded
+        openPrefsButton.frame = NSRect(x: 140, y: 70, width: 200, height: 32)
+        contentView.addSubview(openPrefsButton)
+
+        // Status label
+        statusLabel = NSTextField(labelWithString: "")
+        statusLabel.frame = NSRect(x: 40, y: 40, width: 400, height: 20)
+        statusLabel.alignment = .center
+        statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        contentView.addSubview(statusLabel)
+
+        // Skip All button
+        skipButton = NSButton(title: "Skip All", target: self, action: #selector(skipAllClicked))
+        skipButton.bezelStyle = .rounded
+        skipButton.frame = NSRect(x: 20, y: 10, width: 100, height: 32)
+        contentView.addSubview(skipButton)
+
+        // Next/Finish button
+        nextButton = NSButton(title: "Next", target: self, action: #selector(nextClicked))
+        nextButton.bezelStyle = .rounded
+        nextButton.frame = NSRect(x: 360, y: 10, width: 100, height: 32)
+        nextButton.keyEquivalent = "\r"
+        contentView.addSubview(nextButton)
+
+        updateUI()
+    }
+
+    func show() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        startPolling()
+
+        // For microphone, request permission immediately
+        if let currentPermission = currentPermission, currentPermission == .microphone {
+            PermissionChecker.requestMicrophonePermission { [weak self] granted in
+                if granted {
+                    self?.updateUI()
+                }
+            }
+        }
+    }
+
+    private var currentPermission: PermissionType? {
+        guard currentStep < permissionsToRequest.count else { return nil }
+        return permissionsToRequest[currentStep]
+    }
+
+    private func updateUI() {
+        guard let permission = currentPermission else {
+            finishWizard()
+            return
+        }
+
+        // Update progress dots
+        for (i, dot) in progressDots.enumerated() {
+            if i < currentStep {
+                dot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+            } else if i == currentStep {
+                dot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+            } else {
+                dot.layer?.backgroundColor = NSColor.systemGray.cgColor
+            }
+        }
+
+        // Update icon
+        let config = NSImage.SymbolConfiguration(pointSize: 48, weight: .regular)
+        iconImageView.image = NSImage(systemSymbolName: permission.iconName, accessibilityDescription: permission.title)?
+            .withSymbolConfiguration(config)
+        iconImageView.contentTintColor = .systemBlue
+
+        // Update labels
+        stepLabel.stringValue = "Step \(currentStep + 1) of \(permissionsToRequest.count)"
+        titleLabel.stringValue = permission.title
+        explanationLabel.stringValue = permission.explanation
+
+        // Update status
+        let isGranted = PermissionChecker.checkPermission(permission)
+        if isGranted {
+            statusLabel.stringValue = "✓ Permission Granted"
+            statusLabel.textColor = .systemGreen
+            nextButton.title = (currentStep == permissionsToRequest.count - 1) ? "Finish" : "Next"
+            nextButton.isEnabled = true
+        } else {
+            statusLabel.stringValue = "⚠ Permission Required"
+            statusLabel.textColor = .systemOrange
+            nextButton.title = (currentStep == permissionsToRequest.count - 1) ? "Finish" : "Next"
+            // Allow next even if permission not granted (they can skip)
+            nextButton.isEnabled = true
+        }
+    }
+
+    private func startPolling() {
+        pollingTimer?.invalidate()
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.checkCurrentPermission()
+        }
+    }
+
+    private func stopPolling() {
+        pollingTimer?.invalidate()
+        pollingTimer = nil
+    }
+
+    private func checkCurrentPermission() {
+        guard let permission = currentPermission else { return }
+
+        let isGranted = PermissionChecker.checkPermission(permission)
+
+        // Update status label
+        if isGranted {
+            statusLabel.stringValue = "✓ Permission Granted"
+            statusLabel.textColor = .systemGreen
+
+            // Auto-advance after a short delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self = self else { return }
+                // Verify still granted and still on same step
+                if PermissionChecker.checkPermission(permission) {
+                    self.advanceToNextStep()
+                }
+            }
+        } else {
+            statusLabel.stringValue = "⚠ Permission Required"
+            statusLabel.textColor = .systemOrange
+        }
+    }
+
+    @objc private func openSystemPreferences() {
+        guard let permission = currentPermission else { return }
+        NSWorkspace.shared.open(permission.systemPreferencesURL)
+
+        // For accessibility, also show the system prompt
+        if permission == .accessibility {
+            PermissionChecker.promptAccessibilityPermission()
+        }
+    }
+
+    @objc private func skipAllClicked() {
+        let alert = NSAlert()
+        alert.messageText = "Skip Permission Setup?"
+        alert.informativeText = "Whisper Voice may not function correctly without these permissions. You can configure them later in System Preferences."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Skip Anyway")
+        alert.addButton(withTitle: "Continue Setup")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            stopPolling()
+            window.close()
+            onComplete?()
+        }
+    }
+
+    @objc private func nextClicked() {
+        advanceToNextStep()
+    }
+
+    private func advanceToNextStep() {
+        currentStep += 1
+
+        if currentStep >= permissionsToRequest.count {
+            finishWizard()
+        } else {
+            updateUI()
+
+            // For microphone, request permission immediately
+            if let permission = currentPermission, permission == .microphone {
+                PermissionChecker.requestMicrophonePermission { [weak self] granted in
+                    if granted {
+                        self?.updateUI()
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishWizard() {
+        stopPolling()
+        window.close()
+
+        // Check if all permissions are granted
+        let missing = PermissionChecker.missingPermissions()
+        if !missing.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Some Permissions Missing"
+            alert.informativeText = "The following permissions are still needed:\n\n" +
+                missing.map { "• \($0.title)" }.joined(separator: "\n") +
+                "\n\nYou can configure them later via the menu bar icon."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Continue Anyway")
+            alert.addButton(withTitle: "Re-check Permissions")
+
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                // Restart wizard with missing permissions
+                currentStep = 0
+                permissionsToRequest = missing
+                progressDots.forEach { $0.removeFromSuperview() }
+                progressDots.removeAll()
+                setupProgressDots()
+                updateUI()
+                show()
+                return
+            }
+        }
+
+        onComplete?()
+    }
+
+    private func setupProgressDots() {
+        guard let contentView = window.contentView else { return }
+
+        let totalDots = permissionsToRequest.count
+        let dotSize: CGFloat = 12
+        let dotSpacing: CGFloat = 20
+        let totalWidth = CGFloat(totalDots) * dotSize + CGFloat(totalDots - 1) * dotSpacing
+        var dotX = (480 - totalWidth) / 2
+
+        for i in 0..<totalDots {
+            let dot = NSView(frame: NSRect(x: dotX, y: 309, width: dotSize, height: dotSize))
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = dotSize / 2
+            dot.layer?.backgroundColor = (i == 0 ? NSColor.systemBlue : NSColor.systemGray).cgColor
+            contentView.addSubview(dot)
+            progressDots.append(dot)
+            dotX += dotSize + dotSpacing
+        }
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        stopPolling()
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Warn user if closing without completing
+        let missing = PermissionChecker.missingPermissions()
+        if !missing.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Close Permission Setup?"
+            alert.informativeText = "Some permissions are still missing. Whisper Voice may not function correctly."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Close Anyway")
+            alert.addButton(withTitle: "Continue Setup")
+
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                return false
+            }
+        }
+
+        stopPolling()
+        onComplete?()
+        return true
+    }
+}
+
+// MARK: - Preferences Window
+
+class PreferencesWindow: NSObject, NSWindowDelegate {
+    private var window: NSWindow!
+    private var tabView: NSTabView!
+
+    // General tab elements
+    private var providerPopup: NSPopUpButton!
+    private var apiKeyField: NSSecureTextField!
+    private var apiKeyLinkButton: NSButton!
+    private var testConnectionButton: NSButton!
+    private var connectionStatusLabel: NSTextField!
+
+    // Shortcuts tab elements
+    private var toggleShortcutPopup: NSPopUpButton!
+    private var pttKeyPopup: NSPopUpButton!
+
+    // Logs tab elements
+    private var logsTextView: NSTextView!
+    private var autoScrollCheckbox: NSButton!
+    private var logsRefreshTimer: Timer?
+
+    // Callbacks
+    var onSettingsChanged: (() -> Void)?
+
+    // Current config snapshot
+    private var currentConfig: Config?
+
+    override init() {
+        super.init()
+        setupWindow()
+    }
+
+    private func setupWindow() {
+        // Create window
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Whisper Voice Preferences"
+        window.center()
+        window.delegate = self
+        window.isReleasedWhenClosed = false
+
+        guard let contentView = window.contentView else { return }
+        contentView.wantsLayer = true
+
+        // Create tab view
+        tabView = NSTabView(frame: NSRect(x: 10, y: 50, width: 480, height: 340))
+        contentView.addSubview(tabView)
+
+        // Add tabs
+        setupGeneralTab()
+        setupShortcutsTab()
+        setupLogsTab()
+
+        // Bottom buttons
+        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
+        cancelButton.bezelStyle = .rounded
+        cancelButton.frame = NSRect(x: 310, y: 10, width: 80, height: 32)
+        contentView.addSubview(cancelButton)
+
+        let saveButton = NSButton(title: "Save & Apply", target: self, action: #selector(saveClicked))
+        saveButton.bezelStyle = .rounded
+        saveButton.frame = NSRect(x: 400, y: 10, width: 90, height: 32)
+        saveButton.keyEquivalent = "\r"
+        contentView.addSubview(saveButton)
+    }
+
+    private func setupGeneralTab() {
+        let generalTab = NSTabViewItem(identifier: "general")
+        generalTab.label = "General"
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+
+        // Provider label
+        let providerLabel = NSTextField(labelWithString: "Transcription Provider:")
+        providerLabel.frame = NSRect(x: 20, y: 250, width: 200, height: 20)
+        view.addSubview(providerLabel)
+
+        // Provider popup
+        providerPopup = NSPopUpButton(frame: NSRect(x: 20, y: 220, width: 250, height: 26))
+        for provider in TranscriptionProviderFactory.availableProviders {
+            providerPopup.addItem(withTitle: provider.displayName)
+            providerPopup.lastItem?.representedObject = provider
+        }
+        providerPopup.target = self
+        providerPopup.action = #selector(providerSelectionChanged)
+        view.addSubview(providerPopup)
+
+        // API Key label
+        let apiKeyLabel = NSTextField(labelWithString: "API Key:")
+        apiKeyLabel.frame = NSRect(x: 20, y: 180, width: 200, height: 20)
+        view.addSubview(apiKeyLabel)
+
+        // API Key field
+        apiKeyField = NSSecureTextField(frame: NSRect(x: 20, y: 150, width: 420, height: 26))
+        apiKeyField.placeholderString = "sk-..."
+        view.addSubview(apiKeyField)
+
+        // API Key link
+        apiKeyLinkButton = NSButton(frame: NSRect(x: 20, y: 125, width: 300, height: 20))
+        apiKeyLinkButton.bezelStyle = .inline
+        apiKeyLinkButton.isBordered = false
+        apiKeyLinkButton.target = self
+        apiKeyLinkButton.action = #selector(openApiKeyPage)
+        updateApiKeyLink(for: TranscriptionProviderFactory.availableProviders.first!)
+        view.addSubview(apiKeyLinkButton)
+
+        // Test connection button
+        testConnectionButton = NSButton(title: "Test Connection", target: self, action: #selector(testConnectionClicked))
+        testConnectionButton.bezelStyle = .rounded
+        testConnectionButton.frame = NSRect(x: 20, y: 80, width: 130, height: 32)
+        view.addSubview(testConnectionButton)
+
+        // Connection status label
+        connectionStatusLabel = NSTextField(labelWithString: "")
+        connectionStatusLabel.frame = NSRect(x: 160, y: 85, width: 280, height: 20)
+        connectionStatusLabel.textColor = .secondaryLabelColor
+        view.addSubview(connectionStatusLabel)
+
+        generalTab.view = view
+        tabView.addTabViewItem(generalTab)
+    }
+
+    private func setupShortcutsTab() {
+        let shortcutsTab = NSTabViewItem(identifier: "shortcuts")
+        shortcutsTab.label = "Shortcuts"
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+
+        // Toggle shortcut label
+        let toggleLabel = NSTextField(labelWithString: "Toggle Recording Shortcut:")
+        toggleLabel.frame = NSRect(x: 20, y: 250, width: 200, height: 20)
+        view.addSubview(toggleLabel)
+
+        // Toggle shortcut popup
+        toggleShortcutPopup = NSPopUpButton(frame: NSRect(x: 20, y: 220, width: 200, height: 26))
+        toggleShortcutPopup.addItems(withTitles: ["Option + Space", "Control + Space", "Cmd + Shift + Space"])
+        view.addSubview(toggleShortcutPopup)
+
+        // PTT key label
+        let pttLabel = NSTextField(labelWithString: "Push-to-Talk Key:")
+        pttLabel.frame = NSRect(x: 20, y: 170, width: 200, height: 20)
+        view.addSubview(pttLabel)
+
+        // PTT key popup
+        pttKeyPopup = NSPopUpButton(frame: NSRect(x: 20, y: 140, width: 200, height: 26))
+        pttKeyPopup.addItems(withTitles: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"])
+        view.addSubview(pttKeyPopup)
+
+        // Note
+        let noteLabel = NSTextField(wrappingLabelWithString: "Note: Changes take effect immediately after saving.")
+        noteLabel.frame = NSRect(x: 20, y: 80, width: 420, height: 40)
+        noteLabel.textColor = .secondaryLabelColor
+        noteLabel.font = NSFont.systemFont(ofSize: 12)
+        view.addSubview(noteLabel)
+
+        shortcutsTab.view = view
+        tabView.addTabViewItem(shortcutsTab)
+    }
+
+    private func setupLogsTab() {
+        let logsTab = NSTabViewItem(identifier: "logs")
+        logsTab.label = "Logs"
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+
+        // Clear logs button
+        let clearButton = NSButton(title: "Clear Logs", target: self, action: #selector(clearLogsClicked))
+        clearButton.bezelStyle = .rounded
+        clearButton.frame = NSRect(x: 20, y: 265, width: 100, height: 26)
+        view.addSubview(clearButton)
+
+        // Auto-scroll checkbox
+        autoScrollCheckbox = NSButton(checkboxWithTitle: "Auto-scroll", target: nil, action: nil)
+        autoScrollCheckbox.frame = NSRect(x: 350, y: 265, width: 100, height: 26)
+        autoScrollCheckbox.state = .on
+        view.addSubview(autoScrollCheckbox)
+
+        // Logs scroll view
+        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 10, width: 420, height: 250))
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+
+        logsTextView = NSTextView(frame: scrollView.bounds)
+        logsTextView.isEditable = false
+        logsTextView.isSelectable = true
+        logsTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        logsTextView.textColor = .labelColor
+        logsTextView.backgroundColor = .textBackgroundColor
+        logsTextView.autoresizingMask = [.width, .height]
+
+        scrollView.documentView = logsTextView
+        view.addSubview(scrollView)
+
+        logsTab.view = view
+        tabView.addTabViewItem(logsTab)
+    }
+
+    func show() {
+        // Load current config
+        currentConfig = Config.load()
+        populateFields()
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Start logs refresh timer
+        startLogsRefresh()
+    }
+
+    private func populateFields() {
+        guard let config = currentConfig else { return }
+
+        // Provider
+        let providerIndex = TranscriptionProviderFactory.availableProviders.firstIndex { $0.id == config.provider } ?? 0
+        providerPopup.selectItem(at: providerIndex)
+        if let provider = TranscriptionProviderFactory.availableProviders[safe: providerIndex] {
+            updateApiKeyLink(for: provider)
+            apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
+        }
+
+        // API Key
+        apiKeyField.stringValue = config.getCurrentApiKey()
+
+        // Toggle shortcut
+        let modifiers = config.shortcutModifiers
+        if modifiers & UInt32(controlKey) != 0 {
+            toggleShortcutPopup.selectItem(at: 1)
+        } else if modifiers & UInt32(cmdKey) != 0 && modifiers & UInt32(shiftKey) != 0 {
+            toggleShortcutPopup.selectItem(at: 2)
+        } else {
+            toggleShortcutPopup.selectItem(at: 0)
+        }
+
+        // PTT key
+        let pttKeyCodes: [UInt32] = [
+            UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
+            UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
+            UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
+        ]
+        if let pttIndex = pttKeyCodes.firstIndex(of: config.pushToTalkKeyCode) {
+            pttKeyPopup.selectItem(at: pttIndex)
+        }
+
+        // Reset connection status
+        connectionStatusLabel.stringValue = ""
+
+        // Refresh logs
+        refreshLogs()
+    }
+
+    private func updateApiKeyLink(for provider: ProviderInfo) {
+        let host = provider.apiKeyHelpUrl.host ?? "provider website"
+        apiKeyLinkButton.title = "Get your API key from \(host)"
+        apiKeyLinkButton.attributedTitle = NSAttributedString(
+            string: apiKeyLinkButton.title,
+            attributes: [
+                .foregroundColor: NSColor.linkColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ]
+        )
+    }
+
+    @objc private func providerSelectionChanged() {
+        guard let provider = providerPopup.selectedItem?.representedObject as? ProviderInfo else { return }
+        updateApiKeyLink(for: provider)
+        apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
+        connectionStatusLabel.stringValue = ""
+    }
+
+    @objc private func openApiKeyPage() {
+        guard let provider = providerPopup.selectedItem?.representedObject as? ProviderInfo else { return }
+        NSWorkspace.shared.open(provider.apiKeyHelpUrl)
+    }
+
+    @objc private func testConnectionClicked() {
+        guard let provider = providerPopup.selectedItem?.representedObject as? ProviderInfo else { return }
+        let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Validate format first
+        let validation = TranscriptionProviderFactory.validateApiKey(providerId: provider.id, apiKey: apiKey)
+        if !validation.valid {
+            connectionStatusLabel.stringValue = "Invalid: \(validation.error ?? "Unknown error")"
+            connectionStatusLabel.textColor = .systemRed
+            return
+        }
+
+        connectionStatusLabel.stringValue = "Testing..."
+        connectionStatusLabel.textColor = .secondaryLabelColor
+        testConnectionButton.isEnabled = false
+
+        // Test with a minimal API call
+        testApiConnection(providerId: provider.id, apiKey: apiKey) { [weak self] success, error in
+            DispatchQueue.main.async {
+                self?.testConnectionButton.isEnabled = true
+                if success {
+                    self?.connectionStatusLabel.stringValue = "Connected"
+                    self?.connectionStatusLabel.textColor = .systemGreen
+                } else {
+                    self?.connectionStatusLabel.stringValue = "Failed: \(error ?? "Unknown error")"
+                    self?.connectionStatusLabel.textColor = .systemRed
+                }
+            }
+        }
+    }
+
+    private func testApiConnection(providerId: String, apiKey: String, completion: @escaping (Bool, String?) -> Void) {
+        // For OpenAI, we test the models endpoint
+        // For Mistral, we test the models endpoint too
+        let url: URL
+        let authHeader: String
+        let authValue: String
+
+        switch providerId.lowercased() {
+        case "mistral":
+            url = URL(string: "https://api.mistral.ai/v1/models")!
+            authHeader = "x-api-key"
+            authValue = apiKey
+        default: // openai
+            url = URL(string: "https://api.openai.com/v1/models")!
+            authHeader = "Authorization"
+            authValue = "Bearer \(apiKey)"
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(authValue, forHTTPHeaderField: authHeader)
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(false, error.localizedDescription)
+                return
+            }
+
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    completion(true, nil)
+                } else if httpResponse.statusCode == 401 {
+                    completion(false, "Invalid API key")
+                } else {
+                    completion(false, "HTTP \(httpResponse.statusCode)")
+                }
+            } else {
+                completion(false, "No response")
+            }
+        }.resume()
+    }
+
+    @objc private func clearLogsClicked() {
+        LogManager.shared.clearLogs()
+        logsTextView.string = ""
+    }
+
+    private func startLogsRefresh() {
+        logsRefreshTimer?.invalidate()
+        logsRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            // Only refresh if logs tab is selected
+            if self?.tabView.selectedTabViewItem?.identifier as? String == "logs" {
+                self?.refreshLogs()
+            }
+        }
+    }
+
+    private func stopLogsRefresh() {
+        logsRefreshTimer?.invalidate()
+        logsRefreshTimer = nil
+    }
+
+    private func refreshLogs() {
+        let logs = LogManager.shared.getRecentLogs(count: 100)
+        logsTextView.string = logs.joined(separator: "\n")
+
+        // Auto-scroll if enabled
+        if autoScrollCheckbox.state == .on {
+            logsTextView.scrollToEndOfDocument(nil)
+        }
+    }
+
+    @objc private func cancelClicked() {
+        window.close()
+    }
+
+    @objc private func saveClicked() {
+        guard let provider = providerPopup.selectedItem?.representedObject as? ProviderInfo else {
+            showError("Please select a provider")
+            return
+        }
+
+        let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Validate API key
+        let validation = TranscriptionProviderFactory.validateApiKey(providerId: provider.id, apiKey: apiKey)
+        if !validation.valid {
+            showError(validation.error ?? "Invalid API key")
+            return
+        }
+
+        // Parse toggle shortcut
+        let modifiers: UInt32
+        switch toggleShortcutPopup.indexOfSelectedItem {
+        case 1: modifiers = UInt32(controlKey)
+        case 2: modifiers = UInt32(cmdKey | shiftKey)
+        default: modifiers = UInt32(optionKey)
+        }
+
+        // Parse PTT key
+        let pttKeyCodes: [UInt32] = [
+            UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
+            UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
+            UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
+        ]
+        let pttKeyCode = pttKeyCodes[pttKeyPopup.indexOfSelectedItem]
+
+        // Create new config
+        let newConfig = Config(
+            provider: provider.id,
+            apiKey: apiKey,
+            providerApiKeys: [:],
+            shortcutModifiers: modifiers,
+            shortcutKeyCode: UInt32(kVK_Space),
+            pushToTalkKeyCode: pttKeyCode
+        )
+        newConfig.save()
+
+        LogManager.shared.log("Settings saved - Provider: \(provider.displayName), Toggle: \(newConfig.toggleShortcutDescription()), PTT: \(newConfig.pushToTalkDescription())")
+
+        // Notify delegate
+        onSettingsChanged?()
+
+        // Close window
+        window.close()
+
+        // Show confirmation
+        showNotification(title: "Settings Saved", message: "Your preferences have been applied")
+    }
+
+    private func showError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Invalid Settings"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    private func showNotification(title: String, message: String) {
+        let notification = NSUserNotification()
+        notification.title = title
+        notification.informativeText = message
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        stopLogsRefresh()
+    }
+}
+
+// Safe array access extension
+extension Collection {
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
 
 // MARK: - Configuration
 
@@ -197,10 +1218,10 @@ class BaseTranscriptionProvider {
                           userInfo: [NSLocalizedDescriptionKey: "Cannot read audio file"])
         }
 
-        logger.info("Audio file size: \(fileSize) bytes")
+        LogManager.shared.log("Audio file size: \(fileSize) bytes")
 
         if fileSize < minFileSizeBytes {
-            logger.warning("Audio file too small, likely empty recording")
+            LogManager.shared.log("Audio file too small, likely empty recording", level: "WARNING")
             return NSError(domain: "TranscriptionProvider", code: -3,
                           userInfo: [NSLocalizedDescriptionKey: "Recording too short"])
         }
@@ -252,7 +1273,7 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
     }
 
     private func transcribeWithRetry(audioURL: URL, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
-        logger.info("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries) for: \(audioURL.lastPathComponent)")
+        LogManager.shared.log("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries)")
 
         if let error = validateAudioFile(audioURL) {
             completion(.failure(error))
@@ -274,7 +1295,7 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
 
         request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model)
 
-        logger.info("[\(self.displayName)] Sending request (attempt \(attempt))...")
+        LogManager.shared.log("[\(self.displayName)] Sending request (attempt \(attempt))...")
 
         let session = createSession()
         session.dataTask(with: request) { [weak self] data, response, error in
@@ -283,10 +1304,10 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
             guard let self = self else { return }
 
             if let error = error {
-                logger.error("[\(self.displayName)] Request failed (attempt \(attempt)): \(error.localizedDescription)")
+                LogManager.shared.log("[\(self.displayName)] Request failed (attempt \(attempt)): \(error.localizedDescription)", level: "ERROR")
 
                 if attempt < self.maxRetries {
-                    logger.info("[\(self.displayName)] Retrying in 1 second...")
+                    LogManager.shared.log("[\(self.displayName)] Retrying in 1 second...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                         self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
                     }
@@ -297,10 +1318,10 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
             }
 
             if let httpResponse = response as? HTTPURLResponse {
-                logger.info("[\(self.displayName)] Response status: \(httpResponse.statusCode)")
+                LogManager.shared.log("[\(self.displayName)] Response status: \(httpResponse.statusCode)")
 
                 if httpResponse.statusCode >= 500 && attempt < self.maxRetries {
-                    logger.info("[\(self.displayName)] Server error, retrying...")
+                    LogManager.shared.log("[\(self.displayName)] Server error, retrying...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                         self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
                     }
@@ -317,16 +1338,16 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let text = json["text"] as? String {
-                    logger.info("[\(self.displayName)] Transcription successful: \(text.prefix(50))...")
+                    LogManager.shared.log("[\(self.displayName)] Transcription successful")
                     completion(.success(text))
                 } else {
                     let responseStr = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    logger.error("[\(self.displayName)] API error: \(responseStr)")
+                    LogManager.shared.log("[\(self.displayName)] API error: \(responseStr)", level: "ERROR")
                     completion(.failure(NSError(domain: "OpenAI", code: -2,
                                        userInfo: [NSLocalizedDescriptionKey: responseStr])))
                 }
             } catch {
-                logger.error("[\(self.displayName)] JSON parsing error: \(error.localizedDescription)")
+                LogManager.shared.log("[\(self.displayName)] JSON parsing error: \(error.localizedDescription)", level: "ERROR")
                 completion(.failure(error))
             }
         }.resume()
@@ -358,7 +1379,7 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
     }
 
     private func transcribeWithRetry(audioURL: URL, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
-        logger.info("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries) for: \(audioURL.lastPathComponent)")
+        LogManager.shared.log("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries)")
 
         if let error = validateAudioFile(audioURL) {
             completion(.failure(error))
@@ -381,7 +1402,7 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
 
         request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model)
 
-        logger.info("[\(self.displayName)] Sending request (attempt \(attempt))...")
+        LogManager.shared.log("[\(self.displayName)] Sending request (attempt \(attempt))...")
 
         let session = createSession()
         session.dataTask(with: request) { [weak self] data, response, error in
@@ -390,10 +1411,10 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
             guard let self = self else { return }
 
             if let error = error {
-                logger.error("[\(self.displayName)] Request failed (attempt \(attempt)): \(error.localizedDescription)")
+                LogManager.shared.log("[\(self.displayName)] Request failed (attempt \(attempt)): \(error.localizedDescription)", level: "ERROR")
 
                 if attempt < self.maxRetries {
-                    logger.info("[\(self.displayName)] Retrying in 1 second...")
+                    LogManager.shared.log("[\(self.displayName)] Retrying in 1 second...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                         self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
                     }
@@ -404,10 +1425,10 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
             }
 
             if let httpResponse = response as? HTTPURLResponse {
-                logger.info("[\(self.displayName)] Response status: \(httpResponse.statusCode)")
+                LogManager.shared.log("[\(self.displayName)] Response status: \(httpResponse.statusCode)")
 
                 if httpResponse.statusCode >= 500 && attempt < self.maxRetries {
-                    logger.info("[\(self.displayName)] Server error, retrying...")
+                    LogManager.shared.log("[\(self.displayName)] Server error, retrying...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                         self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
                     }
@@ -424,16 +1445,16 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let text = json["text"] as? String {
-                    logger.info("[\(self.displayName)] Transcription successful: \(text.prefix(50))...")
+                    LogManager.shared.log("[\(self.displayName)] Transcription successful")
                     completion(.success(text))
                 } else {
                     let responseStr = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    logger.error("[\(self.displayName)] API error: \(responseStr)")
+                    LogManager.shared.log("[\(self.displayName)] API error: \(responseStr)", level: "ERROR")
                     completion(.failure(NSError(domain: "Mistral", code: -2,
                                        userInfo: [NSLocalizedDescriptionKey: responseStr])))
                 }
             } catch {
-                logger.error("[\(self.displayName)] JSON parsing error: \(error.localizedDescription)")
+                LogManager.shared.log("[\(self.displayName)] JSON parsing error: \(error.localizedDescription)", level: "ERROR")
                 completion(.failure(error))
             }
         }.resume()
@@ -517,6 +1538,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pttGlobalKeyUpMonitor: Any?
     private var pttLocalMonitor: Any?
 
+    // Permission wizard
+    private var permissionWizard: PermissionWizard?
+
+    // Preferences window
+    private var preferencesWindow: PreferencesWindow?
+
+    // Menu items that need updating
+    private var toggleShortcutMenuItem: NSMenuItem?
+    private var pttMenuItem: NSMenuItem?
+
     private enum AppState {
         case idle, recording, transcribing
     }
@@ -529,10 +1560,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.config = config
             self.transcriptionProvider = TranscriptionProviderFactory.create(from: config)
             logger.info("Using transcription provider: \(self.transcriptionProvider?.displayName ?? "unknown")")
-            setupStatusBar()
+            checkPermissionsAndSetup()
         } else {
             showConfigError()
         }
+    }
+
+    private func checkPermissionsAndSetup() {
+        let missingPermissions = PermissionChecker.missingPermissions()
+
+        if missingPermissions.isEmpty {
+            logger.info("All permissions granted, starting app")
+            setupStatusBar()
+        } else {
+            logger.info("Missing permissions: \(missingPermissions.map { $0.title }.joined(separator: ", "))")
+            showPermissionWizard(permissions: missingPermissions)
+        }
+    }
+
+    private func showPermissionWizard(permissions: [PermissionType]) {
+        permissionWizard = PermissionWizard(permissionsToRequest: permissions) { [weak self] in
+            self?.permissionWizard = nil
+            self?.setupStatusBar()
+        }
+        permissionWizard?.show()
     }
 
     private func showConfigError() {
@@ -541,7 +1592,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.config = config
             self.transcriptionProvider = TranscriptionProviderFactory.create(from: config)
             logger.info("Using transcription provider: \(self.transcriptionProvider?.displayName ?? "unknown")")
-            setupStatusBar()
+            checkPermissionsAndSetup()
         } else {
             NSApp.terminate(nil)
         }
@@ -557,8 +1608,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create menu
         let menu = NSMenu()
 
-        menu.addItem(NSMenuItem(title: "\(config.toggleShortcutDescription()) to toggle", action: nil, keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "\(config.pushToTalkDescription()) to record", action: nil, keyEquivalent: ""))
+        toggleShortcutMenuItem = NSMenuItem(title: "\(config.toggleShortcutDescription()) to toggle", action: nil, keyEquivalent: "")
+        menu.addItem(toggleShortcutMenuItem!)
+
+        pttMenuItem = NSMenuItem(title: "\(config.pushToTalkDescription()) to record", action: nil, keyEquivalent: "")
+        menu.addItem(pttMenuItem!)
+
         menu.addItem(NSMenuItem.separator())
 
         let statusMenuItem = NSMenuItem(title: "Status: Idle", action: nil, keyEquivalent: "")
@@ -566,7 +1621,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Version 2.2.0", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "Check Permissions...", action: #selector(showPermissionStatus), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Version 2.3.0", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -575,6 +1633,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupToggleHotkey()
         setupPushToTalkHotkey()
 
+        LogManager.shared.log("App started - Provider: \(transcriptionProvider?.displayName ?? "unknown")")
         print("Whisper Voice started (dual mode: toggle + push-to-talk)")
     }
 
@@ -924,10 +1983,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var transcriptionTimeoutTimer: Timer?
 
     private func startRecording(showStopMessage: Bool) {
-        logger.info("Starting recording (showStopMessage: \(showStopMessage))")
+        LogManager.shared.log("Starting recording (showStopMessage: \(showStopMessage))")
 
         guard audioRecorder.startRecording() else {
-            logger.error("Failed to start recording")
+            LogManager.shared.log("Failed to start recording", level: "ERROR")
             showNotification(title: "Error", message: "Failed to start recording")
             return
         }
@@ -945,10 +2004,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopRecording() {
-        logger.info("Stopping recording")
+        LogManager.shared.log("Stopping recording")
 
         guard let audioURL = audioRecorder.stopRecording() else {
-            logger.warning("No audio URL returned from stopRecording")
+            LogManager.shared.log("No audio URL returned from stopRecording", level: "WARNING")
             state = .idle
             updateStatusIcon()
             updateStatus("Idle")
@@ -964,7 +2023,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         transcriptionTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 45.0, repeats: false) { [weak self] _ in
             DispatchQueue.main.async {
                 if self?.state == .transcribing {
-                    logger.error("Transcription timeout - resetting state")
+                    LogManager.shared.log("Transcription timeout - resetting state", level: "ERROR")
                     self?.audioRecorder.cleanup()
                     self?.showNotification(title: "Error", message: "Transcription timeout")
                     self?.state = .idle
@@ -984,11 +2043,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 switch result {
                 case .success(let text):
-                    logger.info("Transcription complete, pasting text")
+                    LogManager.shared.log("Transcription complete: \(text.prefix(50))...")
                     pasteText(text)
                     self?.showNotification(title: "Transcription Complete", message: String(text.prefix(50)))
                 case .failure(let error):
-                    logger.error("Transcription failed: \(error.localizedDescription)")
+                    LogManager.shared.log("Transcription failed: \(error.localizedDescription)", level: "ERROR")
                     self?.showNotification(title: "Error", message: error.localizedDescription)
                 }
 
@@ -1004,6 +2063,113 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         notification.title = title
         notification.informativeText = message
         NSUserNotificationCenter.default.deliver(notification)
+    }
+
+    @objc private func showPermissionStatus() {
+        let missingPermissions = PermissionChecker.missingPermissions()
+
+        if missingPermissions.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "All Permissions Granted"
+            alert.informativeText = "Whisper Voice has all the permissions it needs:\n\n" +
+                "✓ Microphone Access\n" +
+                "✓ Accessibility\n" +
+                "✓ Input Monitoring"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        } else {
+            // Build status message
+            var statusLines: [String] = []
+            for permission in PermissionType.allCases {
+                let isGranted = PermissionChecker.checkPermission(permission)
+                let symbol = isGranted ? "✓" : "✗"
+                statusLines.append("\(symbol) \(permission.title)")
+            }
+
+            let alert = NSAlert()
+            alert.messageText = "Permission Status"
+            alert.informativeText = statusLines.joined(separator: "\n") +
+                "\n\nWould you like to configure the missing permissions?"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Configure Permissions")
+            alert.addButton(withTitle: "Later")
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                showPermissionWizard(permissions: missingPermissions)
+            }
+        }
+    }
+
+    @objc private func showPreferences() {
+        if preferencesWindow == nil {
+            preferencesWindow = PreferencesWindow()
+            preferencesWindow?.onSettingsChanged = { [weak self] in
+                self?.reloadSettings()
+            }
+        }
+        preferencesWindow?.show()
+    }
+
+    private func reloadSettings() {
+        // Reload config
+        guard let newConfig = Config.load() else {
+            LogManager.shared.log("Failed to reload config", level: "ERROR")
+            return
+        }
+
+        let providerChanged = config?.provider != newConfig.provider ||
+                              config?.getCurrentApiKey() != newConfig.getCurrentApiKey()
+        let shortcutsChanged = config?.shortcutModifiers != newConfig.shortcutModifiers ||
+                               config?.shortcutKeyCode != newConfig.shortcutKeyCode ||
+                               config?.pushToTalkKeyCode != newConfig.pushToTalkKeyCode
+
+        self.config = newConfig
+
+        if providerChanged {
+            reloadProvider()
+        }
+
+        if shortcutsChanged {
+            reloadHotkeys()
+        }
+
+        updateMenuDescriptions()
+        LogManager.shared.log("Settings reloaded successfully")
+    }
+
+    private func reloadProvider() {
+        guard let config = config else { return }
+        transcriptionProvider = TranscriptionProviderFactory.create(from: config)
+        LogManager.shared.log("Provider reloaded: \(transcriptionProvider?.displayName ?? "unknown")")
+    }
+
+    private func reloadHotkeys() {
+        // Remove existing monitors
+        if let m = toggleGlobalMonitor { NSEvent.removeMonitor(m) }
+        if let m = toggleLocalMonitor { NSEvent.removeMonitor(m) }
+        if let m = pttGlobalKeyDownMonitor { NSEvent.removeMonitor(m) }
+        if let m = pttGlobalKeyUpMonitor { NSEvent.removeMonitor(m) }
+        if let m = pttLocalMonitor { NSEvent.removeMonitor(m) }
+
+        toggleGlobalMonitor = nil
+        toggleLocalMonitor = nil
+        pttGlobalKeyDownMonitor = nil
+        pttGlobalKeyUpMonitor = nil
+        pttLocalMonitor = nil
+
+        // Re-setup hotkeys
+        setupToggleHotkey()
+        setupPushToTalkHotkey()
+
+        LogManager.shared.log("Hotkeys reloaded: Toggle=\(config?.toggleShortcutDescription() ?? "?"), PTT=\(config?.pushToTalkDescription() ?? "?")")
+    }
+
+    private func updateMenuDescriptions() {
+        guard let config = config else { return }
+        toggleShortcutMenuItem?.title = "\(config.toggleShortcutDescription()) to toggle"
+        pttMenuItem?.title = "\(config.pushToTalkDescription()) to record"
     }
 
     @objc private func quit() {
