@@ -77,6 +77,34 @@
             align-items: center;
             text-align: center;
             padding: 60px 24px;
+            position: relative;
+        }
+
+        /* Scroll indicator */
+        .scroll-indicator {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            cursor: pointer;
+            opacity: 0.4;
+            transition: opacity 0.3s ease;
+        }
+
+        .scroll-indicator:hover {
+            opacity: 0.8;
+        }
+
+        .scroll-indicator svg {
+            width: 32px;
+            height: 32px;
+            color: var(--text-secondary);
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(8px); }
         }
 
         .logo {
@@ -371,6 +399,12 @@
                 Download for Windows
             </a>
         </div>
+
+        <div class="scroll-indicator" onclick="window.scrollBy({top: window.innerHeight, behavior: 'smooth'})">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </div>
     </section>
 
     <!-- How it works -->
@@ -439,7 +473,7 @@
                 <div class="provider">
                     <h3>Mistral Voxtral</h3>
                     <p class="model">voxtral-mini-latest</p>
-                    <p class="price">Free tier available</p>
+                    <p class="price">~$0.002/min</p>
                 </div>
             </div>
         </div>
