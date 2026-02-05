@@ -11,7 +11,9 @@ struct Config {
     static let configPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".whisper-voice-config.json")
 
-    var apiKey: String
+    var provider: String           // "openai" or "mistral"
+    var apiKey: String             // Main API key (backward compatibility)
+    var providerApiKeys: [String: String]  // Per-provider API keys
     var shortcutModifiers: UInt32  // e.g., optionKey
     var shortcutKeyCode: UInt32    // e.g., kVK_Space
     var pushToTalkKeyCode: UInt32  // e.g., kVK_F3
@@ -23,12 +25,17 @@ struct Config {
             return nil
         }
 
+        // Backward compatible loading
+        let provider = json["provider"] as? String ?? "openai"
+        let providerApiKeys = json["providerApiKeys"] as? [String: String] ?? [:]
         let modifiers = json["shortcutModifiers"] as? UInt32 ?? UInt32(optionKey)
         let keyCode = json["shortcutKeyCode"] as? UInt32 ?? UInt32(kVK_Space)
         let pttKeyCode = json["pushToTalkKeyCode"] as? UInt32 ?? UInt32(kVK_F3)
 
         return Config(
+            provider: provider,
             apiKey: apiKey,
+            providerApiKeys: providerApiKeys,
             shortcutModifiers: modifiers,
             shortcutKeyCode: keyCode,
             pushToTalkKeyCode: pttKeyCode
@@ -36,15 +43,32 @@ struct Config {
     }
 
     func save() {
-        let json: [String: Any] = [
+        var json: [String: Any] = [
+            "provider": provider,
             "apiKey": apiKey,
             "shortcutModifiers": shortcutModifiers,
             "shortcutKeyCode": shortcutKeyCode,
             "pushToTalkKeyCode": pushToTalkKeyCode
         ]
+        if !providerApiKeys.isEmpty {
+            json["providerApiKeys"] = providerApiKeys
+        }
         if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
             try? data.write(to: Config.configPath)
         }
+    }
+
+    /// Get API key for the specified provider, falling back to main apiKey
+    func getApiKey(for providerId: String) -> String {
+        if let key = providerApiKeys[providerId], !key.isEmpty {
+            return key
+        }
+        return apiKey
+    }
+
+    /// Get API key for the current provider
+    func getCurrentApiKey() -> String {
+        return getApiKey(for: provider)
     }
 
     func toggleShortcutDescription() -> String {
@@ -128,17 +152,37 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
 }
 
-// MARK: - Whisper API
+// MARK: - Transcription Provider Protocol
 
-class WhisperAPI {
-    private let apiKey: String
+protocol TranscriptionProvider {
+    var providerId: String { get }
+    var displayName: String { get }
+    var apiKeyHelpUrl: URL { get }
+
+    func validateApiKeyFormat(_ apiKey: String) -> (valid: Bool, errorMessage: String?)
+    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void)
+}
+
+// MARK: - Provider Info (for UI)
+
+struct ProviderInfo {
+    let id: String
+    let displayName: String
+    let apiKeyHelpUrl: URL
+}
+
+// MARK: - Base Transcription Provider
+
+class BaseTranscriptionProvider {
+    let apiKey: String
+    let maxRetries = 3
+    let minFileSizeBytes = 1000
 
     init(apiKey: String) {
         self.apiKey = apiKey
     }
 
-    private func createSession() -> URLSession {
-        // Create fresh session for each request to avoid stale connections
+    func createSession() -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
@@ -146,66 +190,105 @@ class WhisperAPI {
         return URLSession(configuration: config)
     }
 
-    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
-        transcribeWithRetry(audioURL: audioURL, attempt: 1, maxAttempts: 3, completion: completion)
-    }
-
-    private func transcribeWithRetry(audioURL: URL, attempt: Int, maxAttempts: Int, completion: @escaping (Result<String, Error>) -> Void) {
-        logger.info("Starting transcription attempt \(attempt)/\(maxAttempts) for file: \(audioURL.lastPathComponent)")
-
-        // Check file size
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: audioURL.path),
-           let fileSize = attrs[.size] as? Int {
-            logger.info("Audio file size: \(fileSize) bytes")
-            if fileSize < 1000 {
-                logger.warning("Audio file too small, likely empty recording")
-                completion(.failure(NSError(domain: "WhisperAPI", code: -3, userInfo: [NSLocalizedDescriptionKey: "Recording too short"])))
-                return
-            }
+    func validateAudioFile(_ url: URL) -> Error? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let fileSize = attrs[.size] as? Int else {
+            return NSError(domain: "TranscriptionProvider", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Cannot read audio file"])
         }
 
-        let url = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
-        var request = URLRequest(url: url)
+        logger.info("Audio file size: \(fileSize) bytes")
+
+        if fileSize < minFileSizeBytes {
+            logger.warning("Audio file too small, likely empty recording")
+            return NSError(domain: "TranscriptionProvider", code: -3,
+                          userInfo: [NSLocalizedDescriptionKey: "Recording too short"])
+        }
+        return nil
+    }
+
+    func createMultipartBody(boundary: String, audioData: Data, model: String) -> Data {
+        var body = Data()
+
+        // Model field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(model)\r\n".data(using: .utf8)!)
+
+        // Audio file
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        return body
+    }
+}
+
+// MARK: - OpenAI Provider
+
+class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
+    var providerId: String { "openai" }
+    var displayName: String { "OpenAI Whisper" }
+    var apiKeyHelpUrl: URL { URL(string: "https://platform.openai.com/api-keys")! }
+
+    private let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+    private let model = "gpt-4o-mini-transcribe"
+
+    func validateApiKeyFormat(_ apiKey: String) -> (valid: Bool, errorMessage: String?) {
+        if apiKey.isEmpty {
+            return (false, "API key is required.")
+        }
+        if !apiKey.hasPrefix("sk-") {
+            return (false, "OpenAI API key should start with 'sk-'")
+        }
+        return (true, nil)
+    }
+
+    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        transcribeWithRetry(audioURL: audioURL, attempt: 1, completion: completion)
+    }
+
+    private func transcribeWithRetry(audioURL: URL, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
+        logger.info("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries) for: \(audioURL.lastPathComponent)")
+
+        if let error = validateAudioFile(audioURL) {
+            completion(.failure(error))
+            return
+        }
+
+        var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        var body = Data()
-
-        // Model field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
-        body.append("gpt-4o-mini-transcribe\r\n".data(using: .utf8)!)
-
-        // Audio file
-        if let audioData = try? Data(contentsOf: audioURL) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
-            body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
-            body.append(audioData)
-            body.append("\r\n".data(using: .utf8)!)
+        guard let audioData = try? Data(contentsOf: audioURL) else {
+            completion(.failure(NSError(domain: "OpenAI", code: -1,
+                               userInfo: [NSLocalizedDescriptionKey: "Cannot read audio file"])))
+            return
         }
 
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-        request.httpBody = body
+        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model)
 
-        logger.info("Sending request to Whisper API (attempt \(attempt))...")
+        logger.info("[\(self.displayName)] Sending request (attempt \(attempt))...")
 
         let session = createSession()
         session.dataTask(with: request) { [weak self] data, response, error in
-            // Invalidate session after use
             session.invalidateAndCancel()
 
-            if let error = error {
-                logger.error("API request failed (attempt \(attempt)): \(error.localizedDescription)")
+            guard let self = self else { return }
 
-                // Retry if we have attempts left
-                if attempt < maxAttempts {
-                    logger.info("Retrying in 1 second...")
+            if let error = error {
+                logger.error("[\(self.displayName)] Request failed (attempt \(attempt)): \(error.localizedDescription)")
+
+                if attempt < self.maxRetries {
+                    logger.info("[\(self.displayName)] Retrying in 1 second...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                        self?.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
+                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
                     }
                 } else {
                     completion(.failure(error))
@@ -214,39 +297,182 @@ class WhisperAPI {
             }
 
             if let httpResponse = response as? HTTPURLResponse {
-                logger.info("API response status: \(httpResponse.statusCode)")
+                logger.info("[\(self.displayName)] Response status: \(httpResponse.statusCode)")
 
-                // Retry on server errors (5xx)
-                if httpResponse.statusCode >= 500 && attempt < maxAttempts {
-                    logger.info("Server error, retrying in 1 second...")
+                if httpResponse.statusCode >= 500 && attempt < self.maxRetries {
+                    logger.info("[\(self.displayName)] Server error, retrying...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                        self?.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
+                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
                     }
                     return
                 }
             }
 
             guard let data = data else {
-                logger.error("No data received from API")
-                completion(.failure(NSError(domain: "WhisperAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "No data received"])))
+                completion(.failure(NSError(domain: "OpenAI", code: -1,
+                                   userInfo: [NSLocalizedDescriptionKey: "No data received"])))
                 return
             }
 
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let text = json["text"] as? String {
-                    logger.info("Transcription successful: \(text.prefix(50))...")
+                    logger.info("[\(self.displayName)] Transcription successful: \(text.prefix(50))...")
                     completion(.success(text))
                 } else {
                     let responseStr = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    logger.error("API error response: \(responseStr)")
-                    completion(.failure(NSError(domain: "WhisperAPI", code: -2, userInfo: [NSLocalizedDescriptionKey: responseStr])))
+                    logger.error("[\(self.displayName)] API error: \(responseStr)")
+                    completion(.failure(NSError(domain: "OpenAI", code: -2,
+                                       userInfo: [NSLocalizedDescriptionKey: responseStr])))
                 }
             } catch {
-                logger.error("JSON parsing error: \(error.localizedDescription)")
+                logger.error("[\(self.displayName)] JSON parsing error: \(error.localizedDescription)")
                 completion(.failure(error))
             }
         }.resume()
+    }
+}
+
+// MARK: - Mistral Provider
+
+class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
+    var providerId: String { "mistral" }
+    var displayName: String { "Mistral Voxtral" }
+    var apiKeyHelpUrl: URL { URL(string: "https://console.mistral.ai/api-keys")! }
+
+    private let endpoint = URL(string: "https://api.mistral.ai/v1/audio/transcriptions")!
+    private let model = "voxtral-mini-latest"
+
+    func validateApiKeyFormat(_ apiKey: String) -> (valid: Bool, errorMessage: String?) {
+        if apiKey.isEmpty {
+            return (false, "API key is required.")
+        }
+        if apiKey.count < 10 {
+            return (false, "Mistral API key appears too short.")
+        }
+        return (true, nil)
+    }
+
+    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        transcribeWithRetry(audioURL: audioURL, attempt: 1, completion: completion)
+    }
+
+    private func transcribeWithRetry(audioURL: URL, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
+        logger.info("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries) for: \(audioURL.lastPathComponent)")
+
+        if let error = validateAudioFile(audioURL) {
+            completion(.failure(error))
+            return
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        // Mistral uses x-api-key header (NOT Bearer token!)
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        guard let audioData = try? Data(contentsOf: audioURL) else {
+            completion(.failure(NSError(domain: "Mistral", code: -1,
+                               userInfo: [NSLocalizedDescriptionKey: "Cannot read audio file"])))
+            return
+        }
+
+        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model)
+
+        logger.info("[\(self.displayName)] Sending request (attempt \(attempt))...")
+
+        let session = createSession()
+        session.dataTask(with: request) { [weak self] data, response, error in
+            session.invalidateAndCancel()
+
+            guard let self = self else { return }
+
+            if let error = error {
+                logger.error("[\(self.displayName)] Request failed (attempt \(attempt)): \(error.localizedDescription)")
+
+                if attempt < self.maxRetries {
+                    logger.info("[\(self.displayName)] Retrying in 1 second...")
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
+                    }
+                } else {
+                    completion(.failure(error))
+                }
+                return
+            }
+
+            if let httpResponse = response as? HTTPURLResponse {
+                logger.info("[\(self.displayName)] Response status: \(httpResponse.statusCode)")
+
+                if httpResponse.statusCode >= 500 && attempt < self.maxRetries {
+                    logger.info("[\(self.displayName)] Server error, retrying...")
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
+                    }
+                    return
+                }
+            }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "Mistral", code: -1,
+                                   userInfo: [NSLocalizedDescriptionKey: "No data received"])))
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let text = json["text"] as? String {
+                    logger.info("[\(self.displayName)] Transcription successful: \(text.prefix(50))...")
+                    completion(.success(text))
+                } else {
+                    let responseStr = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    logger.error("[\(self.displayName)] API error: \(responseStr)")
+                    completion(.failure(NSError(domain: "Mistral", code: -2,
+                                       userInfo: [NSLocalizedDescriptionKey: responseStr])))
+                }
+            } catch {
+                logger.error("[\(self.displayName)] JSON parsing error: \(error.localizedDescription)")
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Transcription Provider Factory
+
+enum TranscriptionProviderFactory {
+    static let availableProviders: [ProviderInfo] = [
+        ProviderInfo(id: "openai", displayName: "OpenAI Whisper",
+                     apiKeyHelpUrl: URL(string: "https://platform.openai.com/api-keys")!),
+        ProviderInfo(id: "mistral", displayName: "Mistral Voxtral",
+                     apiKeyHelpUrl: URL(string: "https://console.mistral.ai/api-keys")!)
+    ]
+
+    static func create(from config: Config) -> TranscriptionProvider {
+        let providerId = config.provider
+        let apiKey = config.getCurrentApiKey()
+        return create(providerId: providerId, apiKey: apiKey)
+    }
+
+    static func create(providerId: String, apiKey: String) -> TranscriptionProvider {
+        switch providerId.lowercased() {
+        case "mistral":
+            return MistralProvider(apiKey: apiKey)
+        default:
+            return OpenAIProvider(apiKey: apiKey)
+        }
+    }
+
+    static func validateApiKey(providerId: String, apiKey: String) -> (valid: Bool, error: String?) {
+        let provider = create(providerId: providerId, apiKey: apiKey)
+        let result = provider.validateApiKeyFormat(apiKey)
+        return (valid: result.valid, error: result.errorMessage)
+    }
+
+    static func getProviderInfo(for providerId: String) -> ProviderInfo? {
+        return availableProviders.first { $0.id == providerId }
     }
 }
 
@@ -279,7 +505,7 @@ func pasteText(_ text: String) {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var audioRecorder = AudioRecorder()
-    private var whisperAPI: WhisperAPI?
+    private var transcriptionProvider: TranscriptionProvider?
     private var config: Config?
 
     // Toggle mode monitors
@@ -301,7 +527,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Load config or show setup wizard
         if let config = Config.load() {
             self.config = config
-            self.whisperAPI = WhisperAPI(apiKey: config.apiKey)
+            self.transcriptionProvider = TranscriptionProviderFactory.create(from: config)
+            logger.info("Using transcription provider: \(self.transcriptionProvider?.displayName ?? "unknown")")
             setupStatusBar()
         } else {
             showConfigError()
@@ -312,7 +539,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Show setup wizard instead of error
         if let config = showSetupWizard() {
             self.config = config
-            self.whisperAPI = WhisperAPI(apiKey: config.apiKey)
+            self.transcriptionProvider = TranscriptionProviderFactory.create(from: config)
+            logger.info("Using transcription provider: \(self.transcriptionProvider?.displayName ?? "unknown")")
             setupStatusBar()
         } else {
             NSApp.terminate(nil)
@@ -350,6 +578,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("Whisper Voice started (dual mode: toggle + push-to-talk)")
     }
 
+    // Store selected provider info for link button
+    private var selectedProviderInfo: ProviderInfo?
+
     private func showSetupWizard() -> Config? {
         let alert = NSAlert()
         alert.messageText = "Whisper Voice Setup"
@@ -359,56 +590,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Cancel")
 
         // Create accessory view for inputs
-        let accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 350, height: 200))
+        let accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 350, height: 240))
+
+        // Provider selection label
+        let providerLabel = NSTextField(labelWithString: "Transcription Provider:")
+        providerLabel.frame = NSRect(x: 0, y: 210, width: 350, height: 20)
+        accessoryView.addSubview(providerLabel)
+
+        // Provider popup
+        let providerPopup = NSPopUpButton(frame: NSRect(x: 0, y: 185, width: 200, height: 24))
+        for provider in TranscriptionProviderFactory.availableProviders {
+            providerPopup.addItem(withTitle: provider.displayName)
+            providerPopup.lastItem?.representedObject = provider
+        }
+        providerPopup.selectItem(at: 0)
+        selectedProviderInfo = TranscriptionProviderFactory.availableProviders.first
+        accessoryView.addSubview(providerPopup)
 
         // API Key label
-        let apiKeyLabel = NSTextField(labelWithString: "OpenAI API Key:")
-        apiKeyLabel.frame = NSRect(x: 0, y: 170, width: 350, height: 20)
+        let apiKeyLabel = NSTextField(labelWithString: "API Key:")
+        apiKeyLabel.frame = NSRect(x: 0, y: 155, width: 350, height: 20)
         accessoryView.addSubview(apiKeyLabel)
 
         // API Key field
-        let apiKeyField = NSSecureTextField(frame: NSRect(x: 0, y: 145, width: 350, height: 24))
+        let apiKeyField = NSSecureTextField(frame: NSRect(x: 0, y: 130, width: 350, height: 24))
         apiKeyField.placeholderString = "sk-..."
         accessoryView.addSubview(apiKeyField)
 
         // API Key link
-        let linkButton = NSButton(frame: NSRect(x: 0, y: 120, width: 250, height: 20))
-        linkButton.title = "Get your API key from platform.openai.com"
+        let linkButton = NSButton(frame: NSRect(x: 0, y: 105, width: 300, height: 20))
         linkButton.bezelStyle = .inline
         linkButton.isBordered = false
-        linkButton.attributedTitle = NSAttributedString(
-            string: linkButton.title,
-            attributes: [.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
-        )
         linkButton.target = self
         linkButton.action = #selector(openAPIKeyPage)
+        updateLinkButton(linkButton, for: TranscriptionProviderFactory.availableProviders.first!)
         accessoryView.addSubview(linkButton)
+
+        // Provider change handler - update link and placeholder when provider changes
+        providerPopup.target = self
+        providerPopup.action = #selector(providerChanged(_:))
+        objc_setAssociatedObject(providerPopup, "linkButton", linkButton, .OBJC_ASSOCIATION_RETAIN)
+        objc_setAssociatedObject(providerPopup, "apiKeyField", apiKeyField, .OBJC_ASSOCIATION_RETAIN)
 
         // Toggle shortcut label
         let shortcutLabel = NSTextField(labelWithString: "Toggle Shortcut:")
-        shortcutLabel.frame = NSRect(x: 0, y: 85, width: 150, height: 20)
+        shortcutLabel.frame = NSRect(x: 0, y: 70, width: 150, height: 20)
         accessoryView.addSubview(shortcutLabel)
 
         // Toggle shortcut popup
-        let shortcutPopup = NSPopUpButton(frame: NSRect(x: 0, y: 60, width: 160, height: 24))
+        let shortcutPopup = NSPopUpButton(frame: NSRect(x: 0, y: 45, width: 160, height: 24))
         shortcutPopup.addItems(withTitles: ["Option+Space", "Control+Space", "Cmd+Shift+Space"])
         shortcutPopup.selectItem(at: 0)
         accessoryView.addSubview(shortcutPopup)
 
         // PTT key label
         let pttLabel = NSTextField(labelWithString: "Push-to-Talk Key:")
-        pttLabel.frame = NSRect(x: 180, y: 85, width: 150, height: 20)
+        pttLabel.frame = NSRect(x: 180, y: 70, width: 150, height: 20)
         accessoryView.addSubview(pttLabel)
 
         // PTT key popup
-        let pttPopup = NSPopUpButton(frame: NSRect(x: 180, y: 60, width: 160, height: 24))
+        let pttPopup = NSPopUpButton(frame: NSRect(x: 180, y: 45, width: 160, height: 24))
         pttPopup.addItems(withTitles: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"])
         pttPopup.selectItem(at: 2) // F3 default
         accessoryView.addSubview(pttPopup)
 
         // Auto-start checkbox
         let autoStartCheck = NSButton(checkboxWithTitle: "Start at login", target: nil, action: nil)
-        autoStartCheck.frame = NSRect(x: 0, y: 20, width: 200, height: 20)
+        autoStartCheck.frame = NSRect(x: 0, y: 10, width: 200, height: 20)
         accessoryView.addSubview(autoStartCheck)
 
         alert.accessoryView = accessoryView
@@ -419,19 +667,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if response == .alertFirstButtonReturn {
             let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if apiKey.isEmpty {
-                let errorAlert = NSAlert()
-                errorAlert.messageText = "API Key Required"
-                errorAlert.informativeText = "Please enter your OpenAI API key."
-                errorAlert.alertStyle = .warning
-                errorAlert.runModal()
-                return showSetupWizard() // Retry
+            // Get selected provider
+            guard let selectedProvider = providerPopup.selectedItem?.representedObject as? ProviderInfo else {
+                return showSetupWizard()
             }
 
-            if !apiKey.hasPrefix("sk-") {
+            // Provider-specific validation
+            let validation = TranscriptionProviderFactory.validateApiKey(providerId: selectedProvider.id, apiKey: apiKey)
+            if !validation.valid {
                 let errorAlert = NSAlert()
                 errorAlert.messageText = "Invalid API Key"
-                errorAlert.informativeText = "API key should start with 'sk-'"
+                errorAlert.informativeText = validation.error ?? "Please check your API key."
                 errorAlert.alertStyle = .warning
                 errorAlert.runModal()
                 return showSetupWizard() // Retry
@@ -454,7 +700,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let pttKeyCode = pttKeyCodes[pttPopup.indexOfSelectedItem]
 
             let config = Config(
+                provider: selectedProvider.id,
                 apiKey: apiKey,
+                providerApiKeys: [:],
                 shortcutModifiers: modifiers,
                 shortcutKeyCode: UInt32(kVK_Space),
                 pushToTalkKeyCode: pttKeyCode
@@ -472,8 +720,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    @objc private func providerChanged(_ sender: NSPopUpButton) {
+        guard let provider = sender.selectedItem?.representedObject as? ProviderInfo else { return }
+        selectedProviderInfo = provider
+
+        // Update link button
+        if let linkButton = objc_getAssociatedObject(sender, "linkButton") as? NSButton {
+            updateLinkButton(linkButton, for: provider)
+        }
+
+        // Update placeholder
+        if let apiKeyField = objc_getAssociatedObject(sender, "apiKeyField") as? NSTextField {
+            apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
+        }
+    }
+
+    private func updateLinkButton(_ button: NSButton, for provider: ProviderInfo) {
+        let host = provider.apiKeyHelpUrl.host ?? "provider website"
+        button.title = "Get your API key from \(host)"
+        button.attributedTitle = NSAttributedString(
+            string: button.title,
+            attributes: [.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        )
+    }
+
     @objc private func openAPIKeyPage() {
-        if let url = URL(string: "https://platform.openai.com/api-keys") {
+        if let url = selectedProviderInfo?.apiKeyHelpUrl {
             NSWorkspace.shared.open(url)
         }
     }
@@ -702,7 +974,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        whisperAPI?.transcribe(audioURL: audioURL) { [weak self] result in
+        transcriptionProvider?.transcribe(audioURL: audioURL) { [weak self] result in
             DispatchQueue.main.async {
                 // Cancel safety timeout
                 self?.transcriptionTimeoutTimer?.invalidate()
