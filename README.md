@@ -1,6 +1,6 @@
 # Whisper Voice
 
-> Voice-to-text for macOS. Press a shortcut, speak, text appears at your cursor.
+> Voice-to-text for macOS with AI processing modes. Press a shortcut, speak, text appears at your cursor.
 
 Native Swift app supporting **OpenAI Whisper** and **Mistral Voxtral**. No dependencies, lightweight (~2 MB).
 
@@ -14,7 +14,7 @@ Native Swift app supporting **OpenAI Whisper** and **Mistral Voxtral**. No depen
 
 ### Easy Install (Recommended)
 
-1. **[Download WhisperVoice-2.3.0.dmg](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-2.3.0.dmg)**
+1. **[Download WhisperVoice-3.0.0.dmg](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.0.0.dmg)**
 2. Open the DMG file
 3. Drag **Whisper Voice** to your Applications folder
 4. Launch the app - a setup wizard will guide you
@@ -33,24 +33,48 @@ cd whisper-voice
 
 ### Toggle Mode (default)
 1. Press **Option+Space** (configurable)
-2. Speak
-3. Press again to stop
-4. Text is pasted at cursor
+2. Speak - a recording window with waveform appears
+3. Press **Shift** to cycle through AI modes (optional)
+4. Press again to stop → Text is processed and pasted
 
 ### Push-to-Talk Mode
 1. Hold **F3** (configurable)
 2. Speak while holding
-3. Release to transcribe
-4. Text is pasted at cursor
+3. Release to transcribe and paste
 
 ---
 
 ## Features
 
-- **Multi-provider support**: Choose between OpenAI Whisper or Mistral Voxtral
-- **Two recording modes**: Toggle or Push-to-Talk
-- **Preferences window**: Change settings without editing config files (Cmd+,)
-- **Built-in logs**: Debug issues easily from the Preferences window
+### Recording Window
+- **Live waveform visualization** with animated audio levels
+- **Recording timer** showing elapsed time
+- **Status indicators**: red (recording), blue (processing), green (done)
+- **Cancel button** or press Escape to abort
+
+### AI Processing Modes
+Switch modes by pressing **Shift** during recording:
+
+| Mode | Description |
+|------|-------------|
+| **Brut** | Raw transcription, no processing |
+| **Clean** | Removes filler words (um, uh), fixes punctuation |
+| **Formel** | Professional tone, proper structure |
+| **Casual** | Natural, friendly tone |
+| **Markdown** | Converts to headers, lists, code blocks |
+
+> AI modes require an OpenAI API key (uses GPT-4o-mini for processing)
+
+### Transcription History
+- **Cmd+H** to open history window
+- Search through past transcriptions
+- Copy or delete entries
+- Shows provider and mode used
+
+### Other Features
+- **Multi-provider support**: OpenAI Whisper or Mistral Voxtral
+- **Preferences window**: Change settings without editing config (Cmd+,)
+- **Built-in logs**: Debug issues from Preferences → Logs tab
 - **Setup wizard**: Guided first-time configuration
 - **Permission wizard**: Step-by-step macOS permissions setup
 
@@ -60,10 +84,10 @@ cd whisper-voice
 
 | Provider | Model | Cost | Get API Key |
 |----------|-------|------|-------------|
-| **OpenAI** | gpt-4o-mini-transcribe | $0.003/min | [platform.openai.com](https://platform.openai.com/api-keys) |
-| **Mistral** | voxtral-mini-latest | Free tier available | [console.mistral.ai](https://console.mistral.ai/api-keys) |
+| **OpenAI** | whisper-1 | ~$0.006/min | [platform.openai.com](https://platform.openai.com/api-keys) |
+| **Mistral** | voxtral | ~$0.001/min | [console.mistral.ai](https://console.mistral.ai/api-keys) |
 
-You can switch providers anytime from the Preferences window.
+> **Note**: You provide your own API key. For AI processing modes, you need an OpenAI key (even if using Mistral for transcription).
 
 ---
 
@@ -76,7 +100,7 @@ You can switch providers anytime from the Preferences window.
 
 ## Permissions
 
-On first launch, a wizard will guide you through granting these permissions in **System Settings → Privacy & Security**:
+On first launch, a wizard guides you through granting these in **System Settings → Privacy & Security**:
 
 | Permission | Why |
 |------------|-----|
@@ -88,11 +112,26 @@ On first launch, a wizard will guide you through granting these permissions in *
 
 ## Configuration
 
-Settings are stored in `~/.whisper-voice-config.json` but you can change everything from the **Preferences window** (Cmd+, or click menu bar icon → Preferences).
+Settings are stored in `~/.whisper-voice-config.json` but you can change most things from **Preferences** (Cmd+,).
+
+### API Keys for AI Modes
+
+To use AI processing modes with Mistral transcription, add your OpenAI key:
+
+```json
+{
+  "provider": "mistral",
+  "apiKey": "your-mistral-key",
+  "providerApiKeys": {
+    "openai": "sk-your-openai-key"
+  }
+}
+```
 
 ### Shortcut Options
 - **Toggle**: Option+Space, Control+Space, or Cmd+Shift+Space
 - **Push-to-Talk**: F1 through F12
+- **Mode Switch**: Shift (during recording)
 
 ---
 
@@ -104,6 +143,9 @@ Add **Whisper Voice** to Input Monitoring and Accessibility in System Settings.
 ### Text not pasting
 Add **Whisper Voice** to Accessibility in System Settings.
 
+### AI modes are grayed out
+You need an OpenAI API key configured. Add it to `providerApiKeys.openai` in your config.
+
 ### Check logs
 Open Preferences (Cmd+,) → Logs tab to see what's happening.
 
@@ -113,7 +155,7 @@ Open Preferences (Cmd+,) → Logs tab to see what's happening.
 
 ```bash
 cd WhisperVoice
-swift build -c release
+./dev.sh  # Build and hot-reload (preserves permissions)
 ```
 
 Build DMG for distribution:
@@ -131,10 +173,21 @@ whisper-voice/
 ├── uninstall.sh        # Uninstall script
 ├── build-dmg.sh        # Build distributable DMG
 ├── icons/              # Menu bar & app icons
-└── WhisperVoice/       # Swift source
+└── WhisperVoice/
     ├── Package.swift
+    ├── dev.sh          # Development build script
     └── Sources/WhisperVoice/main.swift
 ```
+
+---
+
+## What's New in v3.0
+
+- **Recording window** with live waveform visualization
+- **AI processing modes** (Clean, Formal, Casual, Markdown)
+- **Transcription history** with search (Cmd+H)
+- **Mode switching** with Shift key during recording
+- **Dev workflow** improvements (hot-reload with preserved permissions)
 
 ---
 

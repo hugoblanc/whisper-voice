@@ -176,13 +176,10 @@ fi
 echo -e "${GREEN}OK${NC} Build successful"
 echo ""
 
-# Step 5: Create app bundle
+# Step 5: Create/Update app bundle
 echo -e "${CYAN}[5/5]${NC} Creating application bundle..."
 
-# Remove old app if exists
-rm -rf "$APP_PATH"
-
-# Create app structure
+# Create app structure (preserve existing if present to keep permissions)
 mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
 
@@ -197,8 +194,14 @@ if [ -f "$ICONS_DIR/AppIcon.icns" ]; then
     cp "$ICONS_DIR/AppIcon.icns" "$APP_PATH/Contents/Resources/"
 fi
 
-# Sign the app
-codesign --force --deep --sign - "$APP_PATH"
+# Sign with Apple Development cert if available (preserves permissions!)
+SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
+if [ -n "$SIGN_IDENTITY" ]; then
+    echo -e "Signing with: ${YELLOW}$SIGN_IDENTITY${NC}"
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_PATH"
+else
+    codesign --force --deep --sign - "$APP_PATH"
+fi
 
 echo -e "${GREEN}OK${NC} App installed at: ~/Applications/$APP_NAME.app"
 echo ""

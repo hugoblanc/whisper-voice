@@ -1126,6 +1126,679 @@ func keyCodeToString(_ keyCode: UInt32) -> String {
     }
 }
 
+// MARK: - Processing Modes
+
+struct ProcessingMode {
+    let id: String
+    let name: String
+    let icon: String  // SF Symbol name
+    let systemPrompt: String?  // nil = no AI processing (voice-to-text only)
+
+    var requiresProcessing: Bool { systemPrompt != nil }
+}
+
+class ModeManager {
+    static let shared = ModeManager()
+
+    /// Check if OpenAI API key is configured for AI processing modes
+    var hasOpenAIKey: Bool {
+        guard let config = Config.load() else { return false }
+        let openaiKey = config.providerApiKeys["openai"] ?? ""
+        // If using OpenAI as transcription provider, the main apiKey works too
+        if config.provider == "openai" && !config.apiKey.isEmpty {
+            return true
+        }
+        return !openaiKey.isEmpty && openaiKey.hasPrefix("sk-")
+    }
+
+    /// Get the OpenAI API key for processing
+    var openAIKey: String? {
+        guard let config = Config.load() else { return nil }
+        // First check providerApiKeys
+        if let key = config.providerApiKeys["openai"], !key.isEmpty, key.hasPrefix("sk-") {
+            return key
+        }
+        // Fall back to main apiKey if using OpenAI as provider
+        if config.provider == "openai" && !config.apiKey.isEmpty {
+            return config.apiKey
+        }
+        return nil
+    }
+
+    let modes: [ProcessingMode] = [
+        ProcessingMode(
+            id: "voice-to-text",
+            name: "Brut",
+            icon: "waveform",
+            systemPrompt: nil
+        ),
+        ProcessingMode(
+            id: "clean",
+            name: "Clean",
+            icon: "sparkles",
+            systemPrompt: """
+            Tu es un assistant qui nettoie des transcriptions vocales.
+            Règles:
+            - Supprime les hésitations (euh, hmm, ben, bah, genre, en fait répété)
+            - Corrige la ponctuation et les majuscules
+            - Garde le sens et le ton exact du message
+            - Ne reformule PAS, ne résume PAS
+            - Réponds UNIQUEMENT avec le texte corrigé, rien d'autre
+            """
+        ),
+        ProcessingMode(
+            id: "formal",
+            name: "Formel",
+            icon: "briefcase",
+            systemPrompt: """
+            Tu es un assistant qui transforme des transcriptions vocales en texte professionnel.
+            Règles:
+            - Adopte un ton formel et professionnel
+            - Corrige grammaire, ponctuation, majuscules
+            - Structure le texte si nécessaire (paragraphes)
+            - Garde le message original intact
+            - Réponds UNIQUEMENT avec le texte transformé, rien d'autre
+            """
+        ),
+        ProcessingMode(
+            id: "casual",
+            name: "Casual",
+            icon: "face.smiling",
+            systemPrompt: """
+            Tu es un assistant qui nettoie des transcriptions vocales en gardant un ton décontracté.
+            Règles:
+            - Garde un ton naturel et amical
+            - Supprime les hésitations excessives mais garde le naturel
+            - Corrige les erreurs évidentes seulement
+            - Préserve les expressions familières
+            - Réponds UNIQUEMENT avec le texte nettoyé, rien d'autre
+            """
+        ),
+        ProcessingMode(
+            id: "markdown",
+            name: "Markdown",
+            icon: "text.badge.checkmark",
+            systemPrompt: """
+            Tu es un assistant qui convertit des transcriptions vocales en Markdown structuré.
+            Règles:
+            - Utilise des headers (#, ##) si le contenu a une structure
+            - Utilise des listes (-, *) pour les énumérations
+            - Utilise **gras** pour les points importants
+            - Utilise `code` pour les termes techniques
+            - Corrige grammaire et ponctuation
+            - Réponds UNIQUEMENT avec le texte en Markdown, rien d'autre
+            """
+        )
+    ]
+
+    private(set) var currentModeIndex: Int = 0
+
+    var currentMode: ProcessingMode {
+        modes[currentModeIndex]
+    }
+
+    /// Check if a mode is available (AI modes require OpenAI key)
+    func isModeAvailable(_ mode: ProcessingMode) -> Bool {
+        if mode.requiresProcessing {
+            return hasOpenAIKey
+        }
+        return true
+    }
+
+    func isModeAvailable(at index: Int) -> Bool {
+        guard index >= 0 && index < modes.count else { return false }
+        return isModeAvailable(modes[index])
+    }
+
+    func nextMode() -> ProcessingMode {
+        // Find next available mode
+        var nextIndex = (currentModeIndex + 1) % modes.count
+        var attempts = 0
+
+        while !isModeAvailable(at: nextIndex) && attempts < modes.count {
+            nextIndex = (nextIndex + 1) % modes.count
+            attempts += 1
+        }
+
+        // If no available mode found, stay on current or go to voice-to-text
+        if attempts >= modes.count {
+            currentModeIndex = 0  // Voice-to-text is always available
+        } else {
+            currentModeIndex = nextIndex
+        }
+
+        return currentMode
+    }
+
+    func setMode(index: Int) {
+        guard index >= 0 && index < modes.count else { return }
+        guard isModeAvailable(at: index) else { return }
+        currentModeIndex = index
+    }
+
+    func setMode(id: String) {
+        if let index = modes.firstIndex(where: { $0.id == id }) {
+            setMode(index: index)
+        }
+    }
+}
+
+// MARK: - Text Processor (GPT API)
+
+class TextProcessor {
+    static let shared = TextProcessor()
+
+    private let model = "gpt-4o-mini"
+    private let endpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
+
+    func process(text: String, mode: ProcessingMode, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let systemPrompt = mode.systemPrompt else {
+            // No processing needed
+            completion(.success(text))
+            return
+        }
+
+        LogManager.shared.log("[TextProcessor] Processing with mode: \(mode.name)")
+
+        let messages: [[String: String]] = [
+            ["role": "system", "content": systemPrompt],
+            ["role": "user", "content": text]
+        ]
+
+        let body: [String: Any] = [
+            "model": model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 2048
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else {
+            completion(.failure(NSError(domain: "TextProcessor", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to serialize request"])))
+            return
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = jsonData
+        request.timeoutInterval = 30
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                LogManager.shared.log("[TextProcessor] Network error: \(error.localizedDescription)")
+                completion(.failure(error))
+                return
+            }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "TextProcessor", code: -2, userInfo: [NSLocalizedDescriptionKey: "No data received"])))
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let choices = json["choices"] as? [[String: Any]],
+                   let firstChoice = choices.first,
+                   let message = firstChoice["message"] as? [String: Any],
+                   let content = message["content"] as? String {
+                    LogManager.shared.log("[TextProcessor] Success - processed \(text.count) -> \(content.count) chars")
+                    completion(.success(content.trimmingCharacters(in: .whitespacesAndNewlines)))
+                } else if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let error = json["error"] as? [String: Any],
+                          let message = error["message"] as? String {
+                    LogManager.shared.log("[TextProcessor] API error: \(message)")
+                    completion(.failure(NSError(domain: "TextProcessor", code: -3, userInfo: [NSLocalizedDescriptionKey: message])))
+                } else {
+                    completion(.failure(NSError(domain: "TextProcessor", code: -4, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])))
+                }
+            } catch {
+                LogManager.shared.log("[TextProcessor] Parse error: \(error.localizedDescription)")
+                completion(.failure(error))
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Mode Selector View
+
+class ModeSelectorView: NSView {
+    private var modeViews: [NSView] = []
+    private var modeLabels: [NSTextField] = []
+    private var hintLabel: NSTextField!
+
+    var onModeChanged: ((Int) -> Void)?
+
+    private let expandedWidth: CGFloat = 90
+    private let collapsedWidth: CGFloat = 32
+    private let itemHeight: CGFloat = 28
+    private let spacing: CGFloat = 6
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupViews()
+    }
+
+    private func setupViews() {
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+
+        let modes = ModeManager.shared.modes
+        let hasOpenAI = ModeManager.shared.hasOpenAIKey
+        var xOffset: CGFloat = 8
+
+        for (index, mode) in modes.enumerated() {
+            let isSelected = index == ModeManager.shared.currentModeIndex
+            let isAvailable = ModeManager.shared.isModeAvailable(at: index)
+            let width = isSelected ? expandedWidth : collapsedWidth
+
+            // Container for each mode
+            let container = NSView(frame: NSRect(x: xOffset, y: 4, width: width, height: itemHeight))
+            container.wantsLayer = true
+            container.layer?.cornerRadius = 6
+            container.alphaValue = isAvailable ? 1.0 : 0.35
+
+            if isSelected && isAvailable {
+                container.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
+            }
+
+            // Icon
+            let iconSize: CGFloat = 16
+            let iconX: CGFloat = isSelected ? 8 : (width - iconSize) / 2
+            let iconView = NSImageView(frame: NSRect(x: iconX, y: (itemHeight - iconSize) / 2, width: iconSize, height: iconSize))
+            if let image = NSImage(systemSymbolName: mode.icon, accessibilityDescription: mode.name) {
+                iconView.image = image
+                iconView.contentTintColor = isSelected && isAvailable ? .white : .white.withAlphaComponent(0.6)
+            }
+            container.addSubview(iconView)
+
+            // Label (only for selected)
+            let label = NSTextField(labelWithString: mode.name)
+            label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+            label.textColor = .white
+            label.frame = NSRect(x: 28, y: (itemHeight - 14) / 2, width: 60, height: 14)
+            label.alphaValue = isSelected ? 1 : 0
+            container.addSubview(label)
+            modeLabels.append(label)
+
+            addSubview(container)
+            modeViews.append(container)
+
+            xOffset += width + spacing
+        }
+
+        // Hint label - show different message if no OpenAI key
+        let hintText = hasOpenAI ? "⇧ switch" : "⇧ (need OpenAI key)"
+        hintLabel = NSTextField(labelWithString: hintText)
+        hintLabel.font = NSFont.systemFont(ofSize: 9, weight: .regular)
+        hintLabel.textColor = hasOpenAI ? .white.withAlphaComponent(0.4) : .systemOrange.withAlphaComponent(0.7)
+        hintLabel.frame = NSRect(x: xOffset + 4, y: 11, width: hasOpenAI ? 50 : 110, height: 12)
+        addSubview(hintLabel)
+    }
+
+    func updateSelection(animated: Bool = true) {
+        let selectedIndex = ModeManager.shared.currentModeIndex
+
+        var xOffset: CGFloat = 8
+
+        let updateBlock = {
+            for (index, container) in self.modeViews.enumerated() {
+                let isSelected = index == selectedIndex
+                let isAvailable = ModeManager.shared.isModeAvailable(at: index)
+                let width = isSelected ? self.expandedWidth : self.collapsedWidth
+
+                container.frame = NSRect(x: xOffset, y: 4, width: width, height: self.itemHeight)
+                container.alphaValue = isAvailable ? 1.0 : 0.35
+                container.layer?.backgroundColor = isSelected && isAvailable
+                    ? NSColor.white.withAlphaComponent(0.15).cgColor
+                    : NSColor.clear.cgColor
+
+                // Update icon position and color
+                if let iconView = container.subviews.first as? NSImageView {
+                    let iconX: CGFloat = isSelected ? 8 : (width - 16) / 2
+                    iconView.frame.origin.x = iconX
+                    iconView.contentTintColor = isSelected && isAvailable ? .white : .white.withAlphaComponent(0.6)
+                }
+
+                // Update label visibility
+                self.modeLabels[index].alphaValue = isSelected ? 1 : 0
+
+                xOffset += width + self.spacing
+            }
+
+            // Update hint position
+            self.hintLabel.frame.origin.x = xOffset + 4
+        }
+
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.allowsImplicitAnimation = true
+                updateBlock()
+            }
+        } else {
+            updateBlock()
+        }
+
+        onModeChanged?(selectedIndex)
+    }
+
+    func cycleMode() {
+        _ = ModeManager.shared.nextMode()
+        updateSelection(animated: true)
+    }
+}
+
+// MARK: - Transcription History
+
+struct TranscriptionEntry: Codable {
+    let id: UUID
+    let timestamp: Date
+    let text: String
+    let durationSeconds: Double
+    let provider: String
+
+    init(text: String, durationSeconds: Double, provider: String) {
+        self.id = UUID()
+        self.timestamp = Date()
+        self.text = text
+        self.durationSeconds = durationSeconds
+        self.provider = provider
+    }
+}
+
+class HistoryManager {
+    static let shared = HistoryManager()
+
+    private let historyFileURL: URL
+    private var entries: [TranscriptionEntry] = []
+    private let maxEntries = 500
+    private let queue = DispatchQueue(label: "com.whispervoice.history")
+
+    private init() {
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/WhisperVoice")
+        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        historyFileURL = appSupport.appendingPathComponent("history.json")
+        loadHistory()
+    }
+
+    private func loadHistory() {
+        queue.sync {
+            guard let data = try? Data(contentsOf: historyFileURL),
+                  let decoded = try? JSONDecoder().decode([TranscriptionEntry].self, from: data) else {
+                return
+            }
+            entries = decoded
+        }
+    }
+
+    private func saveHistory() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            if let data = try? JSONEncoder().encode(self.entries) {
+                try? data.write(to: self.historyFileURL)
+            }
+        }
+    }
+
+    func addEntry(_ entry: TranscriptionEntry) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.entries.insert(entry, at: 0)
+            // Trim old entries
+            if self.entries.count > self.maxEntries {
+                self.entries = Array(self.entries.prefix(self.maxEntries))
+            }
+            self.saveHistory()
+        }
+    }
+
+    func getEntries() -> [TranscriptionEntry] {
+        return queue.sync { entries }
+    }
+
+    func search(query: String) -> [TranscriptionEntry] {
+        return queue.sync {
+            if query.isEmpty { return entries }
+            return entries.filter { $0.text.localizedCaseInsensitiveContains(query) }
+        }
+    }
+
+    func deleteEntry(id: UUID) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.entries.removeAll { $0.id == id }
+            self.saveHistory()
+        }
+    }
+
+    func clearHistory() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.entries.removeAll()
+            self.saveHistory()
+        }
+    }
+}
+
+// MARK: - History Window
+
+class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableViewDataSource, NSSearchFieldDelegate {
+    private var window: NSWindow!
+    private var searchField: NSSearchField!
+    private var tableView: NSTableView!
+    private var entries: [TranscriptionEntry] = []
+    private var filteredEntries: [TranscriptionEntry] = []
+
+    override init() {
+        super.init()
+        setupWindow()
+    }
+
+    private func setupWindow() {
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 450),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Transcription History"
+        window.center()
+        window.delegate = self
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 400, height: 300)
+
+        guard let contentView = window.contentView else { return }
+
+        // Search field
+        searchField = NSSearchField(frame: NSRect(x: 16, y: 410, width: 568, height: 28))
+        searchField.placeholderString = "Search transcriptions..."
+        searchField.delegate = self
+        contentView.addSubview(searchField)
+
+        // Table view with scroll
+        let scrollView = NSScrollView(frame: NSRect(x: 16, y: 50, width: 568, height: 350))
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+        scrollView.autoresizingMask = [.width, .height]
+
+        tableView = NSTableView()
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.rowHeight = 60
+        tableView.gridStyleMask = .solidHorizontalGridLineMask
+        tableView.allowsMultipleSelection = false
+        tableView.doubleAction = #selector(copySelectedEntry)
+        tableView.target = self
+
+        // Columns
+        let textColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("text"))
+        textColumn.title = "Transcription"
+        textColumn.width = 380
+        textColumn.minWidth = 200
+        textColumn.resizingMask = .autoresizingMask
+        tableView.addTableColumn(textColumn)
+
+        let dateColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("date"))
+        dateColumn.title = "Date"
+        dateColumn.width = 150
+        dateColumn.minWidth = 150
+        dateColumn.maxWidth = 150
+        dateColumn.resizingMask = .userResizingMask
+        tableView.addTableColumn(dateColumn)
+
+        tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+
+        scrollView.documentView = tableView
+        contentView.addSubview(scrollView)
+
+        // Buttons
+        let copyButton = NSButton(title: "Copy", target: self, action: #selector(copySelectedEntry))
+        copyButton.bezelStyle = .rounded
+        copyButton.frame = NSRect(x: 16, y: 12, width: 80, height: 28)
+        contentView.addSubview(copyButton)
+
+        let deleteButton = NSButton(title: "Delete", target: self, action: #selector(deleteSelectedEntry))
+        deleteButton.bezelStyle = .rounded
+        deleteButton.frame = NSRect(x: 104, y: 12, width: 80, height: 28)
+        contentView.addSubview(deleteButton)
+
+        let clearButton = NSButton(title: "Clear All", target: self, action: #selector(clearAllHistory))
+        clearButton.bezelStyle = .rounded
+        clearButton.frame = NSRect(x: 504, y: 12, width: 80, height: 28)
+        contentView.addSubview(clearButton)
+    }
+
+    func show() {
+        reloadData()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func reloadData() {
+        entries = HistoryManager.shared.getEntries()
+        filteredEntries = entries
+        tableView.reloadData()
+    }
+
+    // MARK: - NSTableViewDataSource
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return filteredEntries.count
+    }
+
+    // MARK: - NSTableViewDelegate
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < filteredEntries.count, let column = tableColumn else { return nil }
+        let entry = filteredEntries[row]
+
+        let cellIdentifier = column.identifier
+        var cellView = tableView.makeView(withIdentifier: cellIdentifier, owner: self) as? NSTableCellView
+
+        if cellView == nil {
+            cellView = NSTableCellView()
+            cellView?.identifier = cellIdentifier
+            let textField = NSTextField(labelWithString: "")
+            textField.lineBreakMode = .byTruncatingTail
+            textField.cell?.truncatesLastVisibleLine = true
+            textField.maximumNumberOfLines = 2
+            textField.translatesAutoresizingMaskIntoConstraints = false
+            cellView?.addSubview(textField)
+            cellView?.textField = textField
+
+            // Use constraints for proper sizing
+            NSLayoutConstraint.activate([
+                textField.leadingAnchor.constraint(equalTo: cellView!.leadingAnchor, constant: 4),
+                textField.trailingAnchor.constraint(equalTo: cellView!.trailingAnchor, constant: -4),
+                textField.centerYAnchor.constraint(equalTo: cellView!.centerYAnchor)
+            ])
+        }
+
+        if column.identifier.rawValue == "text" {
+            cellView?.textField?.stringValue = entry.text
+            cellView?.textField?.font = NSFont.systemFont(ofSize: 12)
+            cellView?.textField?.textColor = .labelColor
+        } else if column.identifier.rawValue == "date" {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            cellView?.textField?.stringValue = formatter.string(from: entry.timestamp)
+            cellView?.textField?.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            cellView?.textField?.textColor = .secondaryLabelColor
+            cellView?.textField?.alignment = .right
+        }
+
+        return cellView
+    }
+
+    // MARK: - NSSearchFieldDelegate
+
+    func controlTextDidChange(_ obj: Notification) {
+        let query = searchField.stringValue
+        if query.isEmpty {
+            filteredEntries = entries
+        } else {
+            filteredEntries = HistoryManager.shared.search(query: query)
+        }
+        tableView.reloadData()
+    }
+
+    // MARK: - Actions
+
+    @objc private func copySelectedEntry() {
+        let row = tableView.selectedRow
+        guard row >= 0 && row < filteredEntries.count else {
+            if !filteredEntries.isEmpty {
+                // Copy first entry if nothing selected
+                copyToClipboard(filteredEntries[0].text)
+            }
+            return
+        }
+        copyToClipboard(filteredEntries[row].text)
+    }
+
+    private func copyToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        NSSound(named: "Pop")?.play()
+    }
+
+    @objc private func deleteSelectedEntry() {
+        let row = tableView.selectedRow
+        guard row >= 0 && row < filteredEntries.count else { return }
+
+        let entry = filteredEntries[row]
+        HistoryManager.shared.deleteEntry(id: entry.id)
+        reloadData()
+    }
+
+    @objc private func clearAllHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Clear All History?"
+        alert.informativeText = "This will permanently delete all transcription history. This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear All")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            HistoryManager.shared.clearHistory()
+            reloadData()
+        }
+    }
+}
+
 // MARK: - Audio Recorder
 
 class AudioRecorder: NSObject, AVAudioRecorderDelegate {
@@ -1134,6 +1807,17 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
 
     var isRecording: Bool {
         return audioRecorder?.isRecording ?? false
+    }
+
+    /// Get current audio level (0.0 to 1.0) for waveform visualization
+    var currentLevel: Float {
+        guard let recorder = audioRecorder, recorder.isRecording else { return 0 }
+        recorder.updateMeters()
+        let decibels = recorder.averagePower(forChannel: 0)
+        // Convert decibels (-160 to 0) to linear (0 to 1)
+        let minDb: Float = -60
+        let level = max(0, (decibels - minDb) / (-minDb))
+        return min(1, level)
     }
 
     func startRecording() -> Bool {
@@ -1152,6 +1836,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         do {
             audioRecorder = try AVAudioRecorder(url: tempFileURL!, settings: settings)
             audioRecorder?.delegate = self
+            audioRecorder?.isMeteringEnabled = true  // Enable metering for waveform
             audioRecorder?.record()
             return true
         } catch {
@@ -1170,6 +1855,326 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             try? FileManager.default.removeItem(at: url)
         }
         tempFileURL = nil
+    }
+}
+
+// MARK: - Waveform View
+
+class WaveformView: NSView {
+    private var levels: [CGFloat] = Array(repeating: 0, count: 48)
+    private var currentIndex = 0
+    private var smoothedLevels: [CGFloat] = Array(repeating: 0, count: 48)
+
+    var baseColor: NSColor = NSColor.systemRed
+    var accentColor: NSColor = NSColor.systemOrange
+
+    func addLevel(_ level: Float) {
+        levels[currentIndex] = CGFloat(level)
+
+        // Smooth the levels for nicer animation
+        for i in 0..<smoothedLevels.count {
+            let target = levels[i]
+            let current = smoothedLevels[i]
+            // Fast rise, slow fall for natural look
+            if target > current {
+                smoothedLevels[i] = current + (target - current) * 0.6
+            } else {
+                smoothedLevels[i] = current + (target - current) * 0.12
+            }
+        }
+
+        currentIndex = (currentIndex + 1) % levels.count
+        needsDisplay = true
+    }
+
+    func reset() {
+        levels = Array(repeating: 0, count: levels.count)
+        smoothedLevels = Array(repeating: 0, count: smoothedLevels.count)
+        currentIndex = 0
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        // Background
+        context.setFillColor(NSColor.clear.cgColor)
+        context.fill(bounds)
+
+        // Draw bars - sleek design
+        let barWidth: CGFloat = 3
+        let barSpacing: CGFloat = 3
+        let totalBarWidth = barWidth + barSpacing
+        let numBars = smoothedLevels.count
+        let startX = (bounds.width - CGFloat(numBars) * totalBarWidth) / 2
+        let minHeight: CGFloat = 4
+        let maxHeight = bounds.height
+
+        for i in 0..<numBars {
+            let displayIndex = (currentIndex + i) % numBars
+            let level = smoothedLevels[displayIndex]
+
+            // More dramatic height variation with curve
+            let boostedLevel = pow(level, 0.6)  // Boost low levels for visibility
+            let barHeight = max(minHeight, boostedLevel * maxHeight)
+            let x = startX + CGFloat(i) * totalBarWidth
+            let y = (bounds.height - barHeight) / 2
+
+            let barRect = NSRect(x: x, y: y, width: barWidth, height: barHeight)
+
+            // Gradient color based on level - red to orange to yellow for peaks
+            let color: NSColor
+            if level > 0.7 {
+                // Peak - bright orange/yellow
+                color = NSColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 1.0)
+            } else if level > 0.4 {
+                // Medium-high - orange blend
+                let t = (level - 0.4) / 0.3
+                color = NSColor(
+                    red: 0.9 + 0.1 * t,
+                    green: 0.3 + 0.3 * t,
+                    blue: 0.2,
+                    alpha: 1.0
+                )
+            } else {
+                // Low to medium - base red
+                color = baseColor
+            }
+
+            // Subtle glow for high levels
+            if level > 0.5 {
+                let glowRect = barRect.insetBy(dx: -1.5, dy: -1.5)
+                let glowPath = NSBezierPath(roundedRect: glowRect, xRadius: (barWidth + 3) / 2, yRadius: (barWidth + 3) / 2)
+                color.withAlphaComponent(0.25).setFill()
+                glowPath.fill()
+            }
+
+            // Main bar with rounded caps
+            let path = NSBezierPath(roundedRect: barRect, xRadius: barWidth / 2, yRadius: barWidth / 2)
+            color.setFill()
+            path.fill()
+        }
+    }
+}
+
+// MARK: - Recording Window
+
+class RecordingWindow: NSObject {
+    private var window: NSPanel!
+    private var waveformView: WaveformView!
+    private var statusDot: NSView!
+    private var statusLabel: NSTextField!
+    private var timerLabel: NSTextField!
+    private var stopButton: NSButton!
+    private var cancelButton: NSButton!
+    private var modeSelector: ModeSelectorView!
+
+    private var updateTimer: Timer?
+    private var recordingStartTime: Date?
+
+    var onStop: (() -> Void)?
+    var onCancel: (() -> Void)?
+    var audioLevelProvider: (() -> Float)?
+    var onModeChanged: ((ProcessingMode) -> Void)?
+
+    enum RecordingStatus {
+        case recording
+        case processing
+        case completed
+    }
+
+    override init() {
+        super.init()
+        setupWindow()
+    }
+
+    private func setupWindow() {
+        // Create floating panel - taller to fit mode selector
+        window = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
+            styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = ""
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.isOpaque = false
+        window.backgroundColor = NSColor(white: 0.08, alpha: 0.95)
+        window.hasShadow = true
+
+        guard let contentView = window.contentView else { return }
+        contentView.wantsLayer = true
+        contentView.layer?.cornerRadius = 14
+
+        // Waveform view at top (below title bar area)
+        waveformView = WaveformView(frame: NSRect(x: 16, y: 120, width: 328, height: 45))
+        contentView.addSubview(waveformView)
+
+        // Status row: dot + label + timer
+        statusDot = NSView(frame: NSRect(x: 16, y: 96, width: 10, height: 10))
+        statusDot.wantsLayer = true
+        statusDot.layer?.cornerRadius = 5
+        statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        contentView.addSubview(statusDot)
+
+        statusLabel = NSTextField(labelWithString: "Recording")
+        statusLabel.frame = NSRect(x: 32, y: 93, width: 120, height: 18)
+        statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        statusLabel.textColor = .white
+        contentView.addSubview(statusLabel)
+
+        timerLabel = NSTextField(labelWithString: "0:00")
+        timerLabel.frame = NSRect(x: 290, y: 93, width: 55, height: 18)
+        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        timerLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        timerLabel.alignment = .right
+        contentView.addSubview(timerLabel)
+
+        // Mode selector
+        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 52, width: 336, height: 36))
+        modeSelector.onModeChanged = { [weak self] index in
+            let mode = ModeManager.shared.modes[index]
+            self?.onModeChanged?(mode)
+        }
+        contentView.addSubview(modeSelector)
+
+        // Cancel button
+        cancelButton = NSButton(frame: NSRect(x: 16, y: 12, width: 80, height: 28))
+        cancelButton.title = "Cancel"
+        cancelButton.bezelStyle = .rounded
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelClicked)
+        cancelButton.keyEquivalent = "\u{1b}"  // Escape key
+        contentView.addSubview(cancelButton)
+
+        // Stop button
+        stopButton = NSButton(frame: NSRect(x: 264, y: 12, width: 80, height: 28))
+        stopButton.title = "Stop"
+        stopButton.bezelStyle = .rounded
+        stopButton.target = self
+        stopButton.action = #selector(stopClicked)
+        stopButton.keyEquivalent = "\r"  // Enter key
+        contentView.addSubview(stopButton)
+    }
+
+    func show() {
+        recordingStartTime = Date()
+        waveformView.reset()
+        modeSelector.updateSelection(animated: false)
+        setStatus(.recording)
+
+        // Position at top center of main screen
+        if let screen = NSScreen.main {
+            let screenFrame = screen.visibleFrame
+            let x = screenFrame.midX - window.frame.width / 2
+            let y = screenFrame.maxY - window.frame.height - 50
+            window.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+
+        window.orderFront(nil)
+
+        // Start update timer
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.updateWaveform()
+        }
+
+        // Play start sound
+        playSound(named: "Tink")
+    }
+
+    func hide() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        window.orderOut(nil)
+    }
+
+    func setStatus(_ status: RecordingStatus) {
+        switch status {
+        case .recording:
+            statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            statusLabel.stringValue = "Recording"
+            waveformView.baseColor = NSColor.systemRed
+            waveformView.accentColor = NSColor.systemOrange
+            startPulsingDot()
+        case .processing:
+            statusDot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+            let mode = ModeManager.shared.currentMode
+            statusLabel.stringValue = mode.requiresProcessing ? "Processing (\(mode.name))..." : "Transcribing..."
+            waveformView.baseColor = NSColor.systemBlue
+            waveformView.accentColor = NSColor.systemCyan
+            stopPulsingDot()
+        case .completed:
+            statusDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+            statusLabel.stringValue = "Done"
+            waveformView.baseColor = NSColor.systemGreen
+            waveformView.accentColor = NSColor.systemGreen
+            stopPulsingDot()
+            // Play completion sound
+            playSound(named: "Glass")
+        }
+    }
+
+    func cycleMode() {
+        modeSelector.cycleMode()
+    }
+
+    private func updateWaveform() {
+        // Update waveform with current audio level
+        if let level = audioLevelProvider?() {
+            waveformView.addLevel(level)
+        }
+
+        // Update timer
+        if let startTime = recordingStartTime {
+            let elapsed = Date().timeIntervalSince(startTime)
+            let minutes = Int(elapsed) / 60
+            let seconds = Int(elapsed) % 60
+            timerLabel.stringValue = String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+
+    private var pulseTimer: Timer?
+
+    private func startPulsingDot() {
+        pulseTimer?.invalidate()
+        pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+            guard let dot = self?.statusDot else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.4
+                dot.animator().alphaValue = 0.3
+            }, completionHandler: {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.4
+                    dot.animator().alphaValue = 1.0
+                })
+            })
+        }
+    }
+
+    private func stopPulsingDot() {
+        pulseTimer?.invalidate()
+        pulseTimer = nil
+        statusDot.alphaValue = 1.0
+    }
+
+    private func playSound(named name: String) {
+        NSSound(named: name)?.play()
+    }
+
+    @objc private func stopClicked() {
+        hide()
+        onStop?()
+    }
+
+    @objc private func cancelClicked() {
+        hide()
+        onCancel?()
     }
 }
 
@@ -1538,11 +2543,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pttGlobalKeyUpMonitor: Any?
     private var pttLocalMonitor: Any?
 
+    // Cancel monitor (Escape key)
+    private var cancelGlobalMonitor: Any?
+    private var cancelLocalMonitor: Any?
+    private var modeSwitchGlobalMonitor: Any?
+    private var modeSwitchLocalMonitor: Any?
+    private var selectedModeForCurrentRecording: ProcessingMode?
+
     // Permission wizard
     private var permissionWizard: PermissionWizard?
 
     // Preferences window
     private var preferencesWindow: PreferencesWindow?
+
+    // Recording window (waveform display)
+    private var recordingWindow: RecordingWindow?
+
+    // History window
+    private var historyWindow: HistoryWindow?
+
+    // Recording start time for duration tracking
+    private var recordingStartTime: Date?
 
     // Menu items that need updating
     private var toggleShortcutMenuItem: NSMenuItem?
@@ -1621,10 +2642,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
 
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "History...", action: #selector(showHistory), keyEquivalent: "h"))
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Check Permissions...", action: #selector(showPermissionStatus), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Version 2.3.0", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Version 2.4.0", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -1982,6 +3004,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var transcriptionTimeoutTimer: Timer?
 
+    private func setupRecordingWindow() {
+        recordingWindow = RecordingWindow()
+        recordingWindow?.audioLevelProvider = { [weak self] in
+            return self?.audioRecorder.currentLevel ?? 0
+        }
+        recordingWindow?.onStop = { [weak self] in
+            self?.stopRecording()
+        }
+        recordingWindow?.onCancel = { [weak self] in
+            self?.cancelRecording()
+        }
+    }
+
     private func startRecording(showStopMessage: Bool) {
         LogManager.shared.log("Starting recording (showStopMessage: \(showStopMessage))")
 
@@ -1992,22 +3027,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         state = .recording
+        recordingStartTime = Date()  // Track recording duration
         updateStatusIcon()
         updateStatus("Recording...")
 
-        if showStopMessage {
-            let shortcut = config?.toggleShortcutDescription() ?? "shortcut"
-            showNotification(title: "Recording", message: "\(shortcut) to stop")
-        } else {
-            showNotification(title: "Recording", message: "Release key to stop")
+        // Show recording window with waveform
+        if recordingWindow == nil {
+            setupRecordingWindow()
         }
+        recordingWindow?.show()
+
+        // Setup cancel hotkey (Escape) and mode switch (Shift)
+        setupCancelHotkey()
+        setupModeSwitchMonitor()
     }
 
     private func stopRecording() {
         LogManager.shared.log("Stopping recording")
 
+        // Remove hotkeys
+        removeCancelHotkey()
+        removeModeSwitchMonitor()
+
         guard let audioURL = audioRecorder.stopRecording() else {
             LogManager.shared.log("No audio URL returned from stopRecording", level: "WARNING")
+            recordingWindow?.hide()
             state = .idle
             updateStatusIcon()
             updateStatus("Idle")
@@ -2017,6 +3061,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         state = .transcribing
         updateStatusIcon()
         updateStatus("Transcribing...")
+
+        // Hide recording window immediately when stopping
+        // (user feedback: don't show processing state, looks like still listening)
+        recordingWindow?.hide()
 
         // Safety timeout: reset state after 45 seconds if still transcribing
         transcriptionTimeoutTimer?.invalidate()
@@ -2044,18 +3092,163 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 switch result {
                 case .success(let text):
                     LogManager.shared.log("Transcription complete: \(text.prefix(50))...")
-                    pasteText(text)
-                    self?.showNotification(title: "Transcription Complete", message: String(text.prefix(50)))
+
+                    // Get the mode that was selected during recording
+                    let mode = self?.selectedModeForCurrentRecording ?? ModeManager.shared.currentMode
+
+                    // Check if we need AI processing
+                    if mode.requiresProcessing {
+                        LogManager.shared.log("Processing with mode: \(mode.name)")
+
+                        // Get API key for OpenAI (for text processing)
+                        guard let apiKey = ModeManager.shared.openAIKey else {
+                            LogManager.shared.log("No OpenAI API key for processing, using raw text", level: "WARNING")
+                            self?.finishWithText(text)
+                            return
+                        }
+
+                        // Process with GPT
+                        TextProcessor.shared.process(text: text, mode: mode, apiKey: apiKey) { processResult in
+                            DispatchQueue.main.async {
+                                switch processResult {
+                                case .success(let processedText):
+                                    LogManager.shared.log("Processing complete: \(processedText.prefix(50))...")
+                                    self?.finishWithText(processedText)
+                                case .failure(let error):
+                                    LogManager.shared.log("Processing failed: \(error.localizedDescription), using raw text", level: "WARNING")
+                                    // Fall back to raw transcription
+                                    self?.finishWithText(text)
+                                }
+                            }
+                        }
+                    } else {
+                        // No processing needed, use raw transcription
+                        self?.finishWithText(text)
+                    }
+
                 case .failure(let error):
                     LogManager.shared.log("Transcription failed: \(error.localizedDescription)", level: "ERROR")
                     self?.showNotification(title: "Error", message: error.localizedDescription)
+                    self?.state = .idle
+                    self?.updateStatusIcon()
+                    self?.updateStatus("Idle")
                 }
-
-                self?.state = .idle
-                self?.updateStatusIcon()
-                self?.updateStatus("Idle")
             }
         }
+    }
+
+    private func finishWithText(_ text: String) {
+        // Save to history
+        let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        let provider = config?.provider ?? "unknown"
+        let modeName = selectedModeForCurrentRecording?.name ?? "Voice-to-Text"
+        let entry = TranscriptionEntry(text: text, durationSeconds: duration, provider: "\(provider) + \(modeName)")
+        HistoryManager.shared.addEntry(entry)
+
+        // Play completion sound
+        NSSound(named: "Glass")?.play()
+        pasteText(text)
+
+        state = .idle
+        updateStatusIcon()
+        updateStatus("Idle")
+    }
+
+    private func cancelRecording() {
+        LogManager.shared.log("Recording cancelled by user")
+
+        // Remove hotkeys
+        removeCancelHotkey()
+        removeModeSwitchMonitor()
+
+        // Stop and discard recording
+        _ = audioRecorder.stopRecording()
+        audioRecorder.cleanup()
+
+        // Hide window
+        recordingWindow?.hide()
+
+        // Reset state
+        state = .idle
+        isPushToTalkActive = false
+        updateStatusIcon()
+        updateStatus("Idle")
+
+        // Play cancel sound
+        NSSound(named: "Basso")?.play()
+    }
+
+    private func setupCancelHotkey() {
+        // Global monitor for Escape key
+        cancelGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == UInt16(kVK_Escape) {
+                DispatchQueue.main.async {
+                    if self?.state == .recording {
+                        self?.cancelRecording()
+                    }
+                }
+            }
+        }
+
+        // Local monitor for Escape key
+        cancelLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == UInt16(kVK_Escape) {
+                DispatchQueue.main.async {
+                    if self?.state == .recording {
+                        self?.cancelRecording()
+                    }
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeCancelHotkey() {
+        if let m = cancelGlobalMonitor { NSEvent.removeMonitor(m) }
+        if let m = cancelLocalMonitor { NSEvent.removeMonitor(m) }
+        cancelGlobalMonitor = nil
+        cancelLocalMonitor = nil
+    }
+
+    private func setupModeSwitchMonitor() {
+        // Store the current mode at start of recording
+        selectedModeForCurrentRecording = ModeManager.shared.currentMode
+
+        // Global monitor for Shift key to cycle modes
+        modeSwitchGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            // Detect Shift key press (not release)
+            if event.modifierFlags.contains(.shift) && !(event.modifierFlags.rawValue & UInt(NX_DEVICELSHIFTKEYMASK | NX_DEVICERSHIFTKEYMASK) == 0) {
+                DispatchQueue.main.async {
+                    if self?.state == .recording {
+                        self?.recordingWindow?.cycleMode()
+                        self?.selectedModeForCurrentRecording = ModeManager.shared.currentMode
+                        LogManager.shared.log("Mode switched to: \(ModeManager.shared.currentMode.name)")
+                    }
+                }
+            }
+        }
+
+        // Local monitor for Shift key
+        modeSwitchLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            if event.modifierFlags.contains(.shift) {
+                DispatchQueue.main.async {
+                    if self?.state == .recording {
+                        self?.recordingWindow?.cycleMode()
+                        self?.selectedModeForCurrentRecording = ModeManager.shared.currentMode
+                        LogManager.shared.log("Mode switched to: \(ModeManager.shared.currentMode.name)")
+                    }
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeModeSwitchMonitor() {
+        if let m = modeSwitchGlobalMonitor { NSEvent.removeMonitor(m) }
+        if let m = modeSwitchLocalMonitor { NSEvent.removeMonitor(m) }
+        modeSwitchGlobalMonitor = nil
+        modeSwitchLocalMonitor = nil
     }
 
     private func showNotification(title: String, message: String) {
@@ -2100,6 +3293,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 showPermissionWizard(permissions: missingPermissions)
             }
         }
+    }
+
+    @objc private func showHistory() {
+        if historyWindow == nil {
+            historyWindow = HistoryWindow()
+        }
+        historyWindow?.show()
     }
 
     @objc private func showPreferences() {
