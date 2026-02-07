@@ -2,7 +2,7 @@
 
 > Voice-to-text for macOS with AI processing modes. Press a shortcut, speak, text appears at your cursor.
 
-Native Swift app supporting **OpenAI Whisper** and **Mistral Voxtral**. No dependencies, lightweight (~2 MB).
+Native Swift app supporting **OpenAI Whisper**, **Mistral Voxtral**, and **Local (whisper.cpp)**. No dependencies, lightweight (~2 MB).
 
 ![Whisper Voice](logo_whisper_voice.png)
 
@@ -14,7 +14,7 @@ Native Swift app supporting **OpenAI Whisper** and **Mistral Voxtral**. No depen
 
 ### Easy Install (Recommended)
 
-1. **[Download WhisperVoice-3.0.0.dmg](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.0.0.dmg)**
+1. **[Download WhisperVoice-3.1.0.dmg](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.1.0.dmg)**
 2. Open the DMG file
 3. Drag **Whisper Voice** to your Applications folder
 4. Launch the app - a setup wizard will guide you
@@ -72,7 +72,8 @@ Switch modes by pressing **Shift** during recording:
 - Shows provider and mode used
 
 ### Other Features
-- **Multi-provider support**: OpenAI Whisper or Mistral Voxtral
+- **Multi-provider support**: OpenAI, Mistral, or Local (whisper.cpp)
+- **Offline mode**: 100% local transcription with whisper.cpp
 - **Preferences window**: Change settings without editing config (Cmd+,)
 - **Built-in logs**: Debug issues from Preferences → Logs tab
 - **Setup wizard**: Guided first-time configuration
@@ -82,19 +83,46 @@ Switch modes by pressing **Shift** during recording:
 
 ## Supported Providers
 
-| Provider | Model | Cost | Get API Key |
-|----------|-------|------|-------------|
-| **OpenAI** | whisper-1 | ~$0.006/min | [platform.openai.com](https://platform.openai.com/api-keys) |
-| **Mistral** | voxtral | ~$0.001/min | [console.mistral.ai](https://console.mistral.ai/api-keys) |
+| Provider | Model | Cost | Setup |
+|----------|-------|------|-------|
+| **OpenAI** | gpt-4o-mini-transcribe | ~$0.006/min | [Get API key](https://platform.openai.com/api-keys) |
+| **Mistral** | voxtral-mini | ~$0.001/min | [Get API key](https://console.mistral.ai/api-keys) |
+| **Local** | whisper.cpp | Free | [Setup guide](#local-mode-whispercpp) |
 
-> **Note**: You provide your own API key. For AI processing modes, you need an OpenAI key (even if using Mistral for transcription).
+> **Note**: You provide your own API key. For AI processing modes, you need an OpenAI key (even if using Mistral or Local for transcription).
+
+### Local Mode (whisper.cpp)
+
+Run transcription 100% offline using [whisper.cpp](https://github.com/ggerganov/whisper.cpp). No API key required, no data sent to the cloud.
+
+**Setup (easy - no compilation needed):**
+
+1. Open Preferences (Cmd+,)
+2. Select **Local (whisper.cpp)**
+3. Choose a model from the dropdown
+4. Click **Download** (one-time, models are stored locally)
+5. Click "Test Setup" to verify
+6. Save and start transcribing!
+
+The app includes whisper-server and downloads models automatically from Hugging Face.
+
+**Model recommendations:**
+| Model | Size | Speed | Quality |
+|-------|------|-------|---------|
+| Tiny | 75 MB | Fastest | Basic |
+| Base | 142 MB | Fast | Good |
+| Small | 466 MB | Medium | Better |
+| **Medium** | 1.5 GB | Slower | Great (recommended) |
+| Large | 3 GB | Slowest | Best |
+
+> **Tip**: `Medium` offers the best balance of speed and accuracy. The model loads once and stays in memory for fast subsequent transcriptions.
 
 ---
 
 ## Requirements
 
 - macOS 12.0+
-- API key from OpenAI or Mistral
+- API key from OpenAI or Mistral, **or** whisper.cpp for local mode
 
 ---
 
@@ -127,6 +155,22 @@ To use AI processing modes with Mistral transcription, add your OpenAI key:
   }
 }
 ```
+
+### Local Mode Configuration
+
+For offline transcription with whisper.cpp:
+
+```json
+{
+  "provider": "local",
+  "whisperModelPath": "~/Library/Application Support/WhisperVoice/models/ggml-medium.bin",
+  "whisperLanguage": "fr"
+}
+```
+
+Language options: `"fr"`, `"en"`, `"auto"`
+
+Models downloaded via the app are stored in `~/Library/Application Support/WhisperVoice/models/`
 
 ### Shortcut Options
 - **Toggle**: Option+Space, Control+Space, or Cmd+Shift+Space
@@ -180,6 +224,11 @@ whisper-voice/
 ```
 
 ---
+
+## What's New in v3.1
+
+- **Local mode** with whisper.cpp for 100% offline transcription
+- **No API key required** for local transcription
 
 ## What's New in v3.0
 

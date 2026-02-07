@@ -49,6 +49,13 @@ fi
 echo "Updating binary..."
 cp .build/release/$BINARY_NAME "$APP_PATH/Contents/MacOS/$BINARY_NAME"
 
+# Copy whisper-server if available
+if [ -f "$SCRIPT_DIR/Resources/whisper-server" ]; then
+    echo "Including whisper-server..."
+    cp "$SCRIPT_DIR/Resources/whisper-server" "$APP_PATH/Contents/MacOS/"
+    chmod +x "$APP_PATH/Contents/MacOS/whisper-server"
+fi
+
 # Sign with consistent identity
 echo "Signing..."
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_PATH"

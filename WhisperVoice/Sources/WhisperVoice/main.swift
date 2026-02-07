@@ -566,6 +566,16 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
     private var testConnectionButton: NSButton!
     private var connectionStatusLabel: NSTextField!
 
+    // Local provider elements (shown when local is selected)
+    private var apiKeyLabel: NSTextField!
+    private var localSettingsContainer: NSView!
+    private var modelPopup: NSPopUpButton!
+    private var downloadButton: NSButton!
+    private var downloadProgress: NSProgressIndicator!
+    private var downloadStatusLabel: NSTextField!
+    private var whisperLanguagePopup: NSPopUpButton!
+    private var serverStatusLabel: NSTextField!
+
     // Shortcuts tab elements
     private var toggleShortcutPopup: NSPopUpButton!
     private var pttKeyPopup: NSPopUpButton!
@@ -645,8 +655,8 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         providerPopup.action = #selector(providerSelectionChanged)
         view.addSubview(providerPopup)
 
-        // API Key label
-        let apiKeyLabel = NSTextField(labelWithString: "API Key:")
+        // API Key label (will be hidden for local provider)
+        apiKeyLabel = NSTextField(labelWithString: "API Key:")
         apiKeyLabel.frame = NSRect(x: 20, y: 180, width: 200, height: 20)
         view.addSubview(apiKeyLabel)
 
@@ -664,6 +674,70 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         updateApiKeyLink(for: TranscriptionProviderFactory.availableProviders.first!)
         view.addSubview(apiKeyLinkButton)
 
+        // === Local Provider Settings (hidden by default) ===
+        localSettingsContainer = NSView(frame: NSRect(x: 0, y: 40, width: 460, height: 170))
+        localSettingsContainer.isHidden = true
+        view.addSubview(localSettingsContainer)
+
+        // Model selection
+        let modelLabel = NSTextField(labelWithString: "Model:")
+        modelLabel.frame = NSRect(x: 20, y: 140, width: 80, height: 20)
+        localSettingsContainer.addSubview(modelLabel)
+
+        modelPopup = NSPopUpButton(frame: NSRect(x: 100, y: 137, width: 250, height: 26))
+        for model in WhisperModelInfo.available {
+            let status = WhisperModelManager.shared.isModelDownloaded(model.id) ? " ✓" : ""
+            modelPopup.addItem(withTitle: "\(model.name) (\(model.size))\(status)")
+            modelPopup.lastItem?.representedObject = model
+        }
+        modelPopup.target = self
+        modelPopup.action = #selector(modelSelectionChanged)
+        localSettingsContainer.addSubview(modelPopup)
+
+        // Download button
+        downloadButton = NSButton(title: "Download", target: self, action: #selector(downloadModelClicked))
+        downloadButton.bezelStyle = .rounded
+        downloadButton.frame = NSRect(x: 360, y: 137, width: 90, height: 26)
+        localSettingsContainer.addSubview(downloadButton)
+
+        // Progress bar
+        downloadProgress = NSProgressIndicator(frame: NSRect(x: 20, y: 110, width: 430, height: 20))
+        downloadProgress.style = .bar
+        downloadProgress.minValue = 0
+        downloadProgress.maxValue = 1
+        downloadProgress.isHidden = true
+        localSettingsContainer.addSubview(downloadProgress)
+
+        // Download status
+        downloadStatusLabel = NSTextField(labelWithString: "")
+        downloadStatusLabel.frame = NSRect(x: 20, y: 85, width: 430, height: 20)
+        downloadStatusLabel.textColor = .secondaryLabelColor
+        downloadStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        localSettingsContainer.addSubview(downloadStatusLabel)
+
+        // Language
+        let langLabel = NSTextField(labelWithString: "Language:")
+        langLabel.frame = NSRect(x: 20, y: 55, width: 80, height: 20)
+        localSettingsContainer.addSubview(langLabel)
+
+        whisperLanguagePopup = NSPopUpButton(frame: NSRect(x: 100, y: 52, width: 120, height: 26))
+        whisperLanguagePopup.addItems(withTitles: ["French", "English", "Auto-detect"])
+        localSettingsContainer.addSubview(whisperLanguagePopup)
+
+        // Server status
+        serverStatusLabel = NSTextField(labelWithString: "")
+        serverStatusLabel.frame = NSRect(x: 230, y: 55, width: 220, height: 20)
+        serverStatusLabel.textColor = .secondaryLabelColor
+        serverStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        localSettingsContainer.addSubview(serverStatusLabel)
+
+        // Info text
+        let infoLabel = NSTextField(wrappingLabelWithString: "Local mode runs 100% offline. The model is loaded once and kept in memory for fast transcriptions.")
+        infoLabel.frame = NSRect(x: 20, y: 10, width: 430, height: 35)
+        infoLabel.textColor = .secondaryLabelColor
+        infoLabel.font = NSFont.systemFont(ofSize: 11)
+        localSettingsContainer.addSubview(infoLabel)
+
         // Test connection button
         testConnectionButton = NSButton(title: "Test Connection", target: self, action: #selector(testConnectionClicked))
         testConnectionButton.bezelStyle = .rounded
@@ -678,6 +752,61 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
 
         generalTab.view = view
         tabView.addTabViewItem(generalTab)
+    }
+
+    @objc private func modelSelectionChanged() {
+        updateDownloadButtonState()
+    }
+
+    private func updateDownloadButtonState() {
+        guard let model = modelPopup.selectedItem?.representedObject as? WhisperModelInfo else { return }
+        let isDownloaded = WhisperModelManager.shared.isModelDownloaded(model.id)
+        downloadButton.title = isDownloaded ? "Downloaded" : "Download"
+        downloadButton.isEnabled = !isDownloaded
+    }
+
+    @objc private func downloadModelClicked() {
+        guard let model = modelPopup.selectedItem?.representedObject as? WhisperModelInfo else { return }
+
+        downloadButton.isEnabled = false
+        downloadProgress.isHidden = false
+        downloadProgress.doubleValue = 0
+        downloadStatusLabel.stringValue = "Starting download..."
+
+        WhisperModelManager.shared.onProgress = { [weak self] progress, status in
+            self?.downloadProgress.doubleValue = progress
+            self?.downloadStatusLabel.stringValue = "Downloading: \(status)"
+        }
+
+        WhisperModelManager.shared.onComplete = { [weak self] success, error in
+            self?.downloadProgress.isHidden = true
+
+            if success {
+                self?.downloadStatusLabel.stringValue = "Download complete!"
+                self?.downloadStatusLabel.textColor = .systemGreen
+                self?.refreshModelList()
+            } else {
+                self?.downloadStatusLabel.stringValue = "Download failed: \(error ?? "Unknown error")"
+                self?.downloadStatusLabel.textColor = .systemRed
+                self?.downloadButton.isEnabled = true
+            }
+        }
+
+        WhisperModelManager.shared.downloadModel(model)
+    }
+
+    private func refreshModelList() {
+        let selectedIndex = modelPopup.indexOfSelectedItem
+        modelPopup.removeAllItems()
+
+        for model in WhisperModelInfo.available {
+            let status = WhisperModelManager.shared.isModelDownloaded(model.id) ? " ✓" : ""
+            modelPopup.addItem(withTitle: "\(model.name) (\(model.size))\(status)")
+            modelPopup.lastItem?.representedObject = model
+        }
+
+        modelPopup.selectItem(at: selectedIndex)
+        updateDownloadButtonState()
     }
 
     private func setupShortcutsTab() {
@@ -777,11 +906,40 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         providerPopup.selectItem(at: providerIndex)
         if let provider = TranscriptionProviderFactory.availableProviders[safe: providerIndex] {
             updateApiKeyLink(for: provider)
-            apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
+            providerSelectionChanged() // Update UI visibility
         }
 
         // API Key
         apiKeyField.stringValue = config.getCurrentApiKey()
+
+        // Local whisper settings - select model based on saved path
+        refreshModelList()
+        if !config.whisperModelPath.isEmpty {
+            // Try to find matching model by path
+            for (index, model) in WhisperModelInfo.available.enumerated() {
+                let expectedPath = WhisperModelManager.shared.modelPath(for: model.id).path
+                if config.whisperModelPath == expectedPath || config.whisperModelPath.contains("ggml-\(model.id).bin") {
+                    modelPopup.selectItem(at: index)
+                    break
+                }
+            }
+        }
+        updateDownloadButtonState()
+
+        // Update server status
+        if WhisperServerManager.shared.isRunning {
+            serverStatusLabel.stringValue = "Server running"
+            serverStatusLabel.textColor = .systemGreen
+        } else {
+            serverStatusLabel.stringValue = ""
+        }
+
+        // Language
+        switch config.whisperLanguage {
+        case "en": whisperLanguagePopup.selectItem(at: 1)
+        case "auto": whisperLanguagePopup.selectItem(at: 2)
+        default: whisperLanguagePopup.selectItem(at: 0) // French
+        }
 
         // Toggle shortcut
         let modifiers = config.shortcutModifiers
@@ -825,8 +983,29 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
     @objc private func providerSelectionChanged() {
         guard let provider = providerPopup.selectedItem?.representedObject as? ProviderInfo else { return }
         updateApiKeyLink(for: provider)
-        apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
         connectionStatusLabel.stringValue = ""
+
+        let isLocal = provider.id == "local"
+
+        // Show/hide API key fields
+        apiKeyLabel.isHidden = isLocal
+        apiKeyField.isHidden = isLocal
+        apiKeyLinkButton.isHidden = isLocal
+
+        // Show/hide local settings
+        localSettingsContainer.isHidden = !isLocal
+
+        // Move test button based on provider
+        if isLocal {
+            testConnectionButton.title = "Test Setup"
+            testConnectionButton.frame = NSRect(x: 20, y: 20, width: 130, height: 32)
+            connectionStatusLabel.frame = NSRect(x: 160, y: 25, width: 280, height: 20)
+        } else {
+            testConnectionButton.title = "Test Connection"
+            testConnectionButton.frame = NSRect(x: 20, y: 80, width: 130, height: 32)
+            connectionStatusLabel.frame = NSRect(x: 160, y: 85, width: 280, height: 20)
+            apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
+        }
     }
 
     @objc private func openApiKeyPage() {
@@ -836,6 +1015,13 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
 
     @objc private func testConnectionClicked() {
         guard let provider = providerPopup.selectedItem?.representedObject as? ProviderInfo else { return }
+
+        // Handle local provider differently
+        if provider.id == "local" {
+            testLocalSetup()
+            return
+        }
+
         let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Validate format first
@@ -862,6 +1048,26 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
                     self?.connectionStatusLabel.textColor = .systemRed
                 }
             }
+        }
+    }
+
+    private func testLocalSetup() {
+        guard let model = modelPopup.selectedItem?.representedObject as? WhisperModelInfo else {
+            connectionStatusLabel.stringValue = "No model selected"
+            connectionStatusLabel.textColor = .systemRed
+            return
+        }
+
+        let modelPath = WhisperModelManager.shared.modelPath(for: model.id).path
+        let localProvider = LocalWhisperProvider(modelPath: modelPath)
+        let validation = localProvider.validateSetup()
+
+        if validation.valid {
+            connectionStatusLabel.stringValue = "Setup OK - Ready to use"
+            connectionStatusLabel.textColor = .systemGreen
+        } else {
+            connectionStatusLabel.stringValue = validation.errorMessage ?? "Invalid setup"
+            connectionStatusLabel.textColor = .systemRed
         }
     }
 
@@ -950,11 +1156,42 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
 
         let apiKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Validate API key
-        let validation = TranscriptionProviderFactory.validateApiKey(providerId: provider.id, apiKey: apiKey)
-        if !validation.valid {
-            showError(validation.error ?? "Invalid API key")
-            return
+        // Local whisper settings
+        var modelPath = ""
+        let language: String
+        switch whisperLanguagePopup.indexOfSelectedItem {
+        case 1: language = "en"
+        case 2: language = "auto"
+        default: language = "fr"
+        }
+
+        // Validation based on provider type
+        if provider.id == "local" {
+            // Get selected model
+            guard let model = modelPopup.selectedItem?.representedObject as? WhisperModelInfo else {
+                showError("Please select a model")
+                return
+            }
+
+            modelPath = WhisperModelManager.shared.modelPath(for: model.id).path
+
+            // Validate local setup
+            let localProvider = LocalWhisperProvider(modelPath: modelPath)
+            let validation = localProvider.validateSetup()
+            if !validation.valid {
+                showError(validation.errorMessage ?? "Invalid local setup")
+                return
+            }
+
+            // Stop existing server if running (will restart with new settings)
+            WhisperServerManager.shared.stopServer()
+        } else {
+            // Validate API key for cloud providers
+            let validation = TranscriptionProviderFactory.validateApiKey(providerId: provider.id, apiKey: apiKey)
+            if !validation.valid {
+                showError(validation.error ?? "Invalid API key")
+                return
+            }
         }
 
         // Parse toggle shortcut
@@ -973,18 +1210,28 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         ]
         let pttKeyCode = pttKeyCodes[pttKeyPopup.indexOfSelectedItem]
 
-        // Create new config
+        // Preserve existing providerApiKeys if they exist
+        let existingProviderKeys = currentConfig?.providerApiKeys ?? [:]
+
+        // Create new config with all settings
         let newConfig = Config(
             provider: provider.id,
             apiKey: apiKey,
-            providerApiKeys: [:],
+            providerApiKeys: existingProviderKeys,
             shortcutModifiers: modifiers,
             shortcutKeyCode: UInt32(kVK_Space),
-            pushToTalkKeyCode: pttKeyCode
+            pushToTalkKeyCode: pttKeyCode,
+            whisperCliPath: "",  // No longer used, kept for compatibility
+            whisperModelPath: modelPath,
+            whisperLanguage: language
         )
         newConfig.save()
 
-        LogManager.shared.log("Settings saved - Provider: \(provider.displayName), Toggle: \(newConfig.toggleShortcutDescription()), PTT: \(newConfig.pushToTalkDescription())")
+        if provider.id == "local" {
+            LogManager.shared.log("Settings saved - Provider: Local (whisper.cpp), Model: \(modelPath), Language: \(language)")
+        } else {
+            LogManager.shared.log("Settings saved - Provider: \(provider.displayName), Toggle: \(newConfig.toggleShortcutDescription()), PTT: \(newConfig.pushToTalkDescription())")
+        }
 
         // Notify delegate
         onSettingsChanged?()
@@ -1032,26 +1279,43 @@ struct Config {
     static let configPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".whisper-voice-config.json")
 
-    var provider: String           // "openai" or "mistral"
+    var provider: String           // "openai", "mistral", or "local"
     var apiKey: String             // Main API key (backward compatibility)
     var providerApiKeys: [String: String]  // Per-provider API keys
     var shortcutModifiers: UInt32  // e.g., optionKey
     var shortcutKeyCode: UInt32    // e.g., kVK_Space
     var pushToTalkKeyCode: UInt32  // e.g., kVK_F3
 
+    // Local whisper.cpp settings
+    var whisperCliPath: String     // Path to whisper-cli binary
+    var whisperModelPath: String   // Path to ggml model file
+    var whisperLanguage: String    // Language code (e.g., "fr", "en", "auto")
+
     static func load() -> Config? {
         guard let data = try? Data(contentsOf: configPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let apiKey = json["apiKey"] as? String else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        // API key is optional for local provider
+        let apiKey = json["apiKey"] as? String ?? ""
+        let provider = json["provider"] as? String ?? "openai"
+
+        // For cloud providers, API key is required
+        if provider != "local" && apiKey.isEmpty {
             return nil
         }
 
         // Backward compatible loading
-        let provider = json["provider"] as? String ?? "openai"
         let providerApiKeys = json["providerApiKeys"] as? [String: String] ?? [:]
         let modifiers = json["shortcutModifiers"] as? UInt32 ?? UInt32(optionKey)
         let keyCode = json["shortcutKeyCode"] as? UInt32 ?? UInt32(kVK_Space)
         let pttKeyCode = json["pushToTalkKeyCode"] as? UInt32 ?? UInt32(kVK_F3)
+
+        // Local whisper.cpp settings
+        let whisperCliPath = json["whisperCliPath"] as? String ?? ""
+        let whisperModelPath = json["whisperModelPath"] as? String ?? ""
+        let whisperLanguage = json["whisperLanguage"] as? String ?? "fr"
 
         return Config(
             provider: provider,
@@ -1059,7 +1323,10 @@ struct Config {
             providerApiKeys: providerApiKeys,
             shortcutModifiers: modifiers,
             shortcutKeyCode: keyCode,
-            pushToTalkKeyCode: pttKeyCode
+            pushToTalkKeyCode: pttKeyCode,
+            whisperCliPath: whisperCliPath,
+            whisperModelPath: whisperModelPath,
+            whisperLanguage: whisperLanguage
         )
     }
 
@@ -1073,6 +1340,16 @@ struct Config {
         ]
         if !providerApiKeys.isEmpty {
             json["providerApiKeys"] = providerApiKeys
+        }
+        // Save local whisper settings
+        if !whisperCliPath.isEmpty {
+            json["whisperCliPath"] = whisperCliPath
+        }
+        if !whisperModelPath.isEmpty {
+            json["whisperModelPath"] = whisperModelPath
+        }
+        if !whisperLanguage.isEmpty {
+            json["whisperLanguage"] = whisperLanguage
         }
         if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
             try? data.write(to: Config.configPath)
@@ -2466,6 +2743,475 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
     }
 }
 
+// MARK: - Whisper Model Info
+
+struct WhisperModelInfo {
+    let id: String
+    let name: String
+    let size: String
+    let sizeBytes: Int64
+    let downloadUrl: URL
+
+    static let available: [WhisperModelInfo] = [
+        WhisperModelInfo(
+            id: "tiny",
+            name: "Tiny",
+            size: "75 MB",
+            sizeBytes: 75_000_000,
+            downloadUrl: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin")!
+        ),
+        WhisperModelInfo(
+            id: "base",
+            name: "Base",
+            size: "142 MB",
+            sizeBytes: 142_000_000,
+            downloadUrl: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin")!
+        ),
+        WhisperModelInfo(
+            id: "small",
+            name: "Small",
+            size: "466 MB",
+            sizeBytes: 466_000_000,
+            downloadUrl: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin")!
+        ),
+        WhisperModelInfo(
+            id: "medium",
+            name: "Medium (Recommended)",
+            size: "1.5 GB",
+            sizeBytes: 1_530_000_000,
+            downloadUrl: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!
+        ),
+        WhisperModelInfo(
+            id: "large",
+            name: "Large",
+            size: "3 GB",
+            sizeBytes: 3_090_000_000,
+            downloadUrl: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!
+        )
+    ]
+}
+
+// MARK: - Whisper Model Manager
+
+class WhisperModelManager {
+    static let shared = WhisperModelManager()
+
+    private let modelsDir: URL
+    private var downloadTask: URLSessionDownloadTask?
+    var onProgress: ((Double, String) -> Void)?
+    var onComplete: ((Bool, String?) -> Void)?
+
+    private init() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        modelsDir = appSupport.appendingPathComponent("WhisperVoice/models")
+        try? FileManager.default.createDirectory(at: modelsDir, withIntermediateDirectories: true)
+    }
+
+    var modelsDirectory: URL { modelsDir }
+
+    func modelPath(for modelId: String) -> URL {
+        return modelsDir.appendingPathComponent("ggml-\(modelId).bin")
+    }
+
+    func isModelDownloaded(_ modelId: String) -> Bool {
+        return FileManager.default.fileExists(atPath: modelPath(for: modelId).path)
+    }
+
+    func downloadedModels() -> [String] {
+        return WhisperModelInfo.available.filter { isModelDownloaded($0.id) }.map { $0.id }
+    }
+
+    func downloadModel(_ model: WhisperModelInfo) {
+        let destinationPath = modelPath(for: model.id)
+
+        LogManager.shared.log("[ModelManager] Starting download: \(model.name) from \(model.downloadUrl)")
+
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config, delegate: nil, delegateQueue: .main)
+
+        downloadTask = session.downloadTask(with: model.downloadUrl) { [weak self] tempURL, response, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                LogManager.shared.log("[ModelManager] Download failed: \(error.localizedDescription)", level: "ERROR")
+                self.onComplete?(false, error.localizedDescription)
+                return
+            }
+
+            guard let tempURL = tempURL else {
+                self.onComplete?(false, "No file downloaded")
+                return
+            }
+
+            do {
+                // Remove existing file if present
+                if FileManager.default.fileExists(atPath: destinationPath.path) {
+                    try FileManager.default.removeItem(at: destinationPath)
+                }
+                try FileManager.default.moveItem(at: tempURL, to: destinationPath)
+                LogManager.shared.log("[ModelManager] Download complete: \(destinationPath.path)")
+                self.onComplete?(true, nil)
+            } catch {
+                LogManager.shared.log("[ModelManager] Failed to save model: \(error.localizedDescription)", level: "ERROR")
+                self.onComplete?(false, error.localizedDescription)
+            }
+        }
+
+        // Progress tracking via KVO
+        downloadTask?.resume()
+
+        // Poll progress
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            guard let task = self?.downloadTask else {
+                timer.invalidate()
+                return
+            }
+
+            if task.state == .completed || task.state == .canceling {
+                timer.invalidate()
+                return
+            }
+
+            let received = task.countOfBytesReceived
+            let total = task.countOfBytesExpectedToReceive
+            if total > 0 {
+                let progress = Double(received) / Double(total)
+                let receivedMB = Double(received) / 1_000_000
+                let totalMB = Double(total) / 1_000_000
+                let status = String(format: "%.1f / %.1f MB", receivedMB, totalMB)
+                self?.onProgress?(progress, status)
+            }
+        }
+    }
+
+    func cancelDownload() {
+        downloadTask?.cancel()
+        downloadTask = nil
+    }
+}
+
+// MARK: - Whisper Server Manager
+
+class WhisperServerManager {
+    static let shared = WhisperServerManager()
+
+    private var serverProcess: Process?
+    private let serverPort: Int = 8178
+    private var isStarting = false
+
+    private init() {}
+
+    var isRunning: Bool {
+        return serverProcess?.isRunning ?? false
+    }
+
+    var serverURL: URL {
+        return URL(string: "http://127.0.0.1:\(serverPort)")!
+    }
+
+    /// Get the path to whisper-server (bundled or custom)
+    func getServerPath() -> String? {
+        // First check bundled binary in app Resources
+        if let bundlePath = Bundle.main.resourcePath {
+            let bundledServer = "\(bundlePath)/whisper-server"
+            if FileManager.default.isExecutableFile(atPath: bundledServer) {
+                return bundledServer
+            }
+        }
+
+        // Check in app's MacOS folder
+        if let execPath = Bundle.main.executablePath {
+            let macosDir = (execPath as NSString).deletingLastPathComponent
+            let serverInMacOS = "\(macosDir)/whisper-server"
+            if FileManager.default.isExecutableFile(atPath: serverInMacOS) {
+                return serverInMacOS
+            }
+        }
+
+        // Fallback to config path
+        if let config = Config.load(), !config.whisperCliPath.isEmpty {
+            // Convert whisper-cli path to whisper-server path
+            let serverPath = config.whisperCliPath.replacingOccurrences(of: "whisper-cli", with: "whisper-server")
+            if FileManager.default.isExecutableFile(atPath: serverPath) {
+                return serverPath
+            }
+            // Or use CLI path directly if it's actually pointing to server
+            if FileManager.default.isExecutableFile(atPath: config.whisperCliPath) {
+                return config.whisperCliPath
+            }
+        }
+
+        return nil
+    }
+
+    func startServer(modelPath: String, language: String, completion: @escaping (Bool, String?) -> Void) {
+        if isRunning {
+            LogManager.shared.log("[WhisperServer] Server already running")
+            completion(true, nil)
+            return
+        }
+
+        if isStarting {
+            LogManager.shared.log("[WhisperServer] Server is starting...")
+            completion(false, "Server is starting...")
+            return
+        }
+
+        guard let serverPath = getServerPath() else {
+            let error = "whisper-server not found"
+            LogManager.shared.log("[WhisperServer] \(error)", level: "ERROR")
+            completion(false, error)
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: modelPath) else {
+            let error = "Model not found at: \(modelPath)"
+            LogManager.shared.log("[WhisperServer] \(error)", level: "ERROR")
+            completion(false, error)
+            return
+        }
+
+        isStarting = true
+        LogManager.shared.log("[WhisperServer] Starting server with model: \(modelPath)")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: serverPath)
+            process.arguments = [
+                "-m", modelPath,
+                "-l", language,
+                "--port", String(self.serverPort),
+                "--host", "127.0.0.1"
+            ]
+
+            // Redirect output to /dev/null to avoid blocking
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                self.serverProcess = process
+
+                // Wait for server to be ready (poll health endpoint)
+                var ready = false
+                for _ in 0..<30 {  // 15 seconds max
+                    Thread.sleep(forTimeInterval: 0.5)
+                    if self.checkServerHealth() {
+                        ready = true
+                        break
+                    }
+                }
+
+                self.isStarting = false
+
+                DispatchQueue.main.async {
+                    if ready {
+                        LogManager.shared.log("[WhisperServer] Server started successfully on port \(self.serverPort)")
+                        completion(true, nil)
+                    } else {
+                        LogManager.shared.log("[WhisperServer] Server failed to become ready", level: "ERROR")
+                        self.stopServer()
+                        completion(false, "Server failed to start")
+                    }
+                }
+            } catch {
+                self.isStarting = false
+                LogManager.shared.log("[WhisperServer] Failed to start: \(error.localizedDescription)", level: "ERROR")
+                DispatchQueue.main.async {
+                    completion(false, error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func checkServerHealth() -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        var isHealthy = false
+
+        var request = URLRequest(url: serverURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 1
+
+        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                isHealthy = true
+            }
+            semaphore.signal()
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + 2)
+
+        return isHealthy
+    }
+
+    func stopServer() {
+        if let process = serverProcess, process.isRunning {
+            LogManager.shared.log("[WhisperServer] Stopping server...")
+            process.terminate()
+            serverProcess = nil
+        }
+    }
+
+    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        let inferenceURL = serverURL.appendingPathComponent("inference")
+
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            completion(.failure(NSError(domain: "WhisperServer", code: -1,
+                                       userInfo: [NSLocalizedDescriptionKey: "Audio file not found"])))
+            return
+        }
+
+        guard let audioData = try? Data(contentsOf: audioURL) else {
+            completion(.failure(NSError(domain: "WhisperServer", code: -2,
+                                       userInfo: [NSLocalizedDescriptionKey: "Cannot read audio file"])))
+            return
+        }
+
+        // Create multipart form data
+        let boundary = UUID().uuidString
+        var body = Data()
+
+        // Add file
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // Add response format
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)
+        body.append("json\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var request = URLRequest(url: inferenceURL)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        request.timeoutInterval = 60
+
+        LogManager.shared.log("[WhisperServer] Sending transcription request...")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                LogManager.shared.log("[WhisperServer] Request failed: \(error.localizedDescription)", level: "ERROR")
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+                return
+            }
+
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    completion(.failure(NSError(domain: "WhisperServer", code: -3,
+                                               userInfo: [NSLocalizedDescriptionKey: "No response data"])))
+                }
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let text = json["text"] as? String {
+                    let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    LogManager.shared.log("[WhisperServer] Transcription successful: \(trimmedText.prefix(50))...")
+                    DispatchQueue.main.async {
+                        completion(.success(trimmedText))
+                    }
+                } else {
+                    let responseStr = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    LogManager.shared.log("[WhisperServer] Invalid response: \(responseStr)", level: "ERROR")
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "WhisperServer", code: -4,
+                                                   userInfo: [NSLocalizedDescriptionKey: "Invalid response: \(responseStr)"])))
+                    }
+                }
+            } catch {
+                LogManager.shared.log("[WhisperServer] JSON parse error: \(error.localizedDescription)", level: "ERROR")
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Local Whisper Provider (whisper.cpp server)
+
+class LocalWhisperProvider: TranscriptionProvider {
+    var providerId: String { "local" }
+    var displayName: String { "Local (whisper.cpp)" }
+    var apiKeyHelpUrl: URL { URL(string: "https://github.com/ggerganov/whisper.cpp")! }
+
+    private let modelPath: String
+    private let language: String
+    private let serverManager = WhisperServerManager.shared
+
+    init(modelPath: String, language: String = "fr") {
+        self.modelPath = modelPath
+        self.language = language
+    }
+
+    // Legacy init for compatibility
+    convenience init(cliPath: String, modelPath: String, language: String = "fr") {
+        self.init(modelPath: modelPath, language: language)
+    }
+
+    func validateApiKeyFormat(_ apiKey: String) -> (valid: Bool, errorMessage: String?) {
+        return (true, nil)
+    }
+
+    func validateSetup() -> (valid: Bool, errorMessage: String?) {
+        // Check server binary exists
+        guard serverManager.getServerPath() != nil else {
+            return (false, "whisper-server not found. Please download or build it.")
+        }
+
+        // Check model exists
+        if modelPath.isEmpty {
+            return (false, "No model selected. Please download a model in Preferences.")
+        }
+        if !FileManager.default.fileExists(atPath: modelPath) {
+            return (false, "Model not found at: \(modelPath)")
+        }
+
+        return (true, nil)
+    }
+
+    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        LogManager.shared.log("[LocalWhisper] Starting transcription...")
+
+        // Validate setup first
+        let validation = validateSetup()
+        if !validation.valid {
+            LogManager.shared.log("[LocalWhisper] Setup invalid: \(validation.errorMessage ?? "")", level: "ERROR")
+            completion(.failure(NSError(domain: "LocalWhisper", code: -1,
+                                       userInfo: [NSLocalizedDescriptionKey: validation.errorMessage ?? "Invalid setup"])))
+            return
+        }
+
+        // If server is running, use it directly
+        if serverManager.isRunning {
+            serverManager.transcribe(audioURL: audioURL, completion: completion)
+            return
+        }
+
+        // Start server and then transcribe
+        serverManager.startServer(modelPath: modelPath, language: language) { [weak self] success, error in
+            guard let self = self else { return }
+
+            if success {
+                self.serverManager.transcribe(audioURL: audioURL, completion: completion)
+            } else {
+                completion(.failure(NSError(domain: "LocalWhisper", code: -2,
+                                           userInfo: [NSLocalizedDescriptionKey: error ?? "Failed to start server"])))
+            }
+        }
+    }
+}
+
 // MARK: - Transcription Provider Factory
 
 enum TranscriptionProviderFactory {
@@ -2473,11 +3219,20 @@ enum TranscriptionProviderFactory {
         ProviderInfo(id: "openai", displayName: "OpenAI Whisper",
                      apiKeyHelpUrl: URL(string: "https://platform.openai.com/api-keys")!),
         ProviderInfo(id: "mistral", displayName: "Mistral Voxtral",
-                     apiKeyHelpUrl: URL(string: "https://console.mistral.ai/api-keys")!)
+                     apiKeyHelpUrl: URL(string: "https://console.mistral.ai/api-keys")!),
+        ProviderInfo(id: "local", displayName: "Local (whisper.cpp)",
+                     apiKeyHelpUrl: URL(string: "https://github.com/ggerganov/whisper.cpp")!)
     ]
 
     static func create(from config: Config) -> TranscriptionProvider {
         let providerId = config.provider
+        if providerId == "local" {
+            return LocalWhisperProvider(
+                cliPath: config.whisperCliPath,
+                modelPath: config.whisperModelPath,
+                language: config.whisperLanguage
+            )
+        }
         let apiKey = config.getCurrentApiKey()
         return create(providerId: providerId, apiKey: apiKey)
     }
@@ -2486,6 +3241,9 @@ enum TranscriptionProviderFactory {
         switch providerId.lowercased() {
         case "mistral":
             return MistralProvider(apiKey: apiKey)
+        case "local":
+            // For direct creation without config, use empty paths (will fail validation)
+            return LocalWhisperProvider(cliPath: "", modelPath: "")
         default:
             return OpenAIProvider(apiKey: apiKey)
         }
@@ -2786,7 +3544,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 providerApiKeys: [:],
                 shortcutModifiers: modifiers,
                 shortcutKeyCode: UInt32(kVK_Space),
-                pushToTalkKeyCode: pttKeyCode
+                pushToTalkKeyCode: pttKeyCode,
+                whisperCliPath: "",
+                whisperModelPath: "",
+                whisperLanguage: "fr"
             )
             config.save()
 

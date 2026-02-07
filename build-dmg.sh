@@ -12,7 +12,7 @@ BOLD='\033[1m'
 
 # Config
 APP_NAME="Whisper Voice"
-VERSION="3.0.0"
+VERSION="3.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/WhisperVoice"
 BUILD_DIR="$SCRIPT_DIR/build"
@@ -71,8 +71,22 @@ if [ -f "$SCRIPT_DIR/icons/AppIcon.icns" ]; then
     cp "$SCRIPT_DIR/icons/AppIcon.icns" "$APP_PATH/Contents/Resources/"
 fi
 
-# Sign the app (ad-hoc)
-codesign --force --deep --sign - "$APP_PATH"
+# Copy whisper-server if exists
+if [ -f "$PROJECT_DIR/Resources/whisper-server" ]; then
+    cp "$PROJECT_DIR/Resources/whisper-server" "$APP_PATH/Contents/MacOS/"
+    chmod +x "$APP_PATH/Contents/MacOS/whisper-server"
+    echo -e "  ${GREEN}+${NC} whisper-server included"
+fi
+
+# Sign the app with Developer ID certificate
+DEVELOPER_ID=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+if [ -n "$DEVELOPER_ID" ]; then
+    echo -e "Signing with: ${YELLOW}$DEVELOPER_ID${NC}"
+    codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_PATH"
+else
+    echo -e "${YELLOW}Warning: Developer ID not found, using ad-hoc signing${NC}"
+    codesign --force --deep --sign - "$APP_PATH"
+fi
 
 echo -e "${GREEN}OK${NC}"
 echo ""
