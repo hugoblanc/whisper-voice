@@ -555,7 +555,7 @@ class PermissionWizard: NSObject, NSWindowDelegate {
 
 // MARK: - Preferences Window
 
-class PreferencesWindow: NSObject, NSWindowDelegate {
+class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     private var window: NSWindow!
     private var tabView: NSTabView!
 
@@ -576,9 +576,20 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
     private var whisperLanguagePopup: NSPopUpButton!
     private var serverStatusLabel: NSTextField!
 
+    // Custom vocabulary
+    private var customVocabularyField: NSTextField!
+
+    // Processing model
+    private var processingModelPopup: NSPopUpButton!
+
     // Shortcuts tab elements
     private var toggleShortcutPopup: NSPopUpButton!
     private var pttKeyPopup: NSPopUpButton!
+
+    // Modes tab elements
+    private var modesContainer: NSView!
+    private var customModesData: [[String: String]] = []
+    private var customModePromptViews: [NSTextView] = []
 
     // Logs tab elements
     private var logsTextView: NSTextView!
@@ -619,6 +630,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         // Add tabs
         setupGeneralTab()
         setupShortcutsTab()
+        setupModesTab()
         setupLogsTab()
 
         // Bottom buttons
@@ -673,6 +685,27 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         apiKeyLinkButton.action = #selector(openApiKeyPage)
         updateApiKeyLink(for: TranscriptionProviderFactory.availableProviders.first!)
         view.addSubview(apiKeyLinkButton)
+
+        // Custom Vocabulary
+        let vocabLabel = NSTextField(labelWithString: "Custom Vocabulary (comma-separated):")
+        vocabLabel.frame = NSRect(x: 20, y: 100, width: 300, height: 20)
+        view.addSubview(vocabLabel)
+
+        customVocabularyField = NSTextField(frame: NSRect(x: 20, y: 70, width: 420, height: 26))
+        customVocabularyField.placeholderString = "PostHog, Kubernetes, Chatwoot..."
+        view.addSubview(customVocabularyField)
+
+        // LLM Model for AI processing
+        let llmLabel = NSTextField(labelWithString: "AI Processing Model:")
+        llmLabel.frame = NSRect(x: 20, y: 45, width: 150, height: 20)
+        view.addSubview(llmLabel)
+
+        processingModelPopup = NSPopUpButton(frame: NSRect(x: 170, y: 42, width: 270, height: 26))
+        for model in TextProcessor.availableModels {
+            processingModelPopup.addItem(withTitle: model.name)
+            processingModelPopup.lastItem?.representedObject = model.id
+        }
+        view.addSubview(processingModelPopup)
 
         // === Local Provider Settings (hidden by default) ===
         localSettingsContainer = NSView(frame: NSRect(x: 0, y: 40, width: 460, height: 170))
@@ -741,12 +774,12 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         // Test connection button
         testConnectionButton = NSButton(title: "Test Connection", target: self, action: #selector(testConnectionClicked))
         testConnectionButton.bezelStyle = .rounded
-        testConnectionButton.frame = NSRect(x: 20, y: 80, width: 130, height: 32)
+        testConnectionButton.frame = NSRect(x: 20, y: 10, width: 130, height: 32)
         view.addSubview(testConnectionButton)
 
         // Connection status label
         connectionStatusLabel = NSTextField(labelWithString: "")
-        connectionStatusLabel.frame = NSRect(x: 160, y: 85, width: 280, height: 20)
+        connectionStatusLabel.frame = NSRect(x: 160, y: 15, width: 280, height: 20)
         connectionStatusLabel.textColor = .secondaryLabelColor
         view.addSubview(connectionStatusLabel)
 
@@ -844,6 +877,187 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
 
         shortcutsTab.view = view
         tabView.addTabViewItem(shortcutsTab)
+    }
+
+    private func setupModesTab() {
+        let modesTab = NSTabViewItem(identifier: "modes")
+        modesTab.label = "Modes"
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+
+        // Title
+        let titleLabel = NSTextField(labelWithString: "Custom Processing Modes")
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 13)
+        titleLabel.frame = NSRect(x: 20, y: 270, width: 300, height: 20)
+        view.addSubview(titleLabel)
+
+        // Add mode button
+        let addButton = NSButton(title: "+ Add Mode", target: self, action: #selector(addCustomMode))
+        addButton.bezelStyle = .rounded
+        addButton.frame = NSRect(x: 350, y: 265, width: 100, height: 26)
+        view.addSubview(addButton)
+
+        // Scrollable container for modes list
+        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 10, width: 420, height: 250))
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+
+        modesContainer = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 250))
+        modesContainer.autoresizingMask = [.width]
+
+        let clipView = NSClipView()
+        clipView.documentView = modesContainer
+        scrollView.contentView = clipView
+        view.addSubview(scrollView)
+
+        modesTab.view = view
+        tabView.addTabViewItem(modesTab)
+    }
+
+    @objc private func addCustomMode() {
+        let newMode: [String: String] = [
+            "id": "custom_\(Int(Date().timeIntervalSince1970))",
+            "name": "",
+            "icon": "star",
+            "prompt": ""
+        ]
+        customModesData.append(newMode)
+        refreshModesUI()
+    }
+
+    private func refreshModesUI() {
+        // Clear existing subviews and tracked views
+        modesContainer.subviews.forEach { $0.removeFromSuperview() }
+        customModePromptViews.removeAll()
+
+        let modeHeight: CGFloat = 120
+        let spacing: CGFloat = 10
+        let totalHeight = max(CGFloat(customModesData.count) * (modeHeight + spacing) + 10, modesContainer.enclosingScrollView?.frame.height ?? 250)
+        modesContainer.frame = NSRect(x: 0, y: 0, width: 420, height: totalHeight)
+
+        // Available SF Symbol icons
+        let availableIcons = ["star", "envelope", "doc.text", "globe", "hammer", "wrench", "lightbulb", "book", "pencil", "text.bubble", "brain.head.profile", "list.bullet"]
+
+        for (index, modeData) in customModesData.enumerated() {
+            let yPos = totalHeight - CGFloat(index + 1) * (modeHeight + spacing)
+
+            // Mode card container
+            let card = NSView(frame: NSRect(x: 5, y: yPos, width: 395, height: modeHeight))
+            card.wantsLayer = true
+            card.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            card.layer?.cornerRadius = 6
+            card.layer?.borderWidth = 1
+            card.layer?.borderColor = NSColor.separatorColor.cgColor
+
+            // Name field
+            let nameLabel = NSTextField(labelWithString: "Name:")
+            nameLabel.frame = NSRect(x: 10, y: 90, width: 45, height: 20)
+            nameLabel.font = NSFont.systemFont(ofSize: 11)
+            card.addSubview(nameLabel)
+
+            let nameField = NSTextField(frame: NSRect(x: 55, y: 88, width: 120, height: 22))
+            nameField.stringValue = modeData["name"] ?? ""
+            nameField.placeholderString = "Email"
+            nameField.font = NSFont.systemFont(ofSize: 11)
+            nameField.tag = index * 100 + 1
+            nameField.target = self
+            nameField.action = #selector(customModeFieldChanged(_:))
+            card.addSubview(nameField)
+
+            // Icon popup
+            let iconLabel = NSTextField(labelWithString: "Icon:")
+            iconLabel.frame = NSRect(x: 185, y: 90, width: 35, height: 20)
+            iconLabel.font = NSFont.systemFont(ofSize: 11)
+            card.addSubview(iconLabel)
+
+            let iconPopup = NSPopUpButton(frame: NSRect(x: 220, y: 87, width: 110, height: 22))
+            iconPopup.font = NSFont.systemFont(ofSize: 11)
+            for icon in availableIcons {
+                iconPopup.addItem(withTitle: icon)
+            }
+            if let currentIcon = modeData["icon"], let iconIndex = availableIcons.firstIndex(of: currentIcon) {
+                iconPopup.selectItem(at: iconIndex)
+            }
+            iconPopup.tag = index * 100 + 2
+            iconPopup.target = self
+            iconPopup.action = #selector(customModeIconChanged(_:))
+            card.addSubview(iconPopup)
+
+            // Delete button
+            let deleteButton = NSButton(title: "✕", target: self, action: #selector(deleteCustomMode(_:)))
+            deleteButton.bezelStyle = .inline
+            deleteButton.frame = NSRect(x: 360, y: 88, width: 25, height: 22)
+            deleteButton.tag = index
+            card.addSubview(deleteButton)
+
+            // Prompt text area
+            let promptLabel = NSTextField(labelWithString: "System Prompt:")
+            promptLabel.frame = NSRect(x: 10, y: 62, width: 100, height: 16)
+            promptLabel.font = NSFont.systemFont(ofSize: 11)
+            card.addSubview(promptLabel)
+
+            let promptScrollView = NSScrollView(frame: NSRect(x: 10, y: 5, width: 375, height: 55))
+            promptScrollView.hasVerticalScroller = true
+            promptScrollView.borderType = .bezelBorder
+
+            let promptTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 375, height: 55))
+            promptTextView.string = modeData["prompt"] ?? ""
+            promptTextView.font = NSFont.systemFont(ofSize: 11)
+            promptTextView.isEditable = true
+            promptTextView.isRichText = false
+            promptTextView.autoresizingMask = [.width, .height]
+            promptTextView.delegate = self
+
+            promptScrollView.documentView = promptTextView
+            card.addSubview(promptScrollView)
+
+            // Track this text view for delegate callback
+            customModePromptViews.append(promptTextView)
+
+            modesContainer.addSubview(card)
+        }
+
+        // If no custom modes, show a hint
+        if customModesData.isEmpty {
+            let hintLabel = NSTextField(wrappingLabelWithString: "No custom modes yet. Click '+ Add Mode' to create your own processing mode with a custom system prompt.")
+            hintLabel.frame = NSRect(x: 20, y: totalHeight - 60, width: 370, height: 40)
+            hintLabel.textColor = .secondaryLabelColor
+            hintLabel.font = NSFont.systemFont(ofSize: 12)
+            modesContainer.addSubview(hintLabel)
+        }
+    }
+
+    @objc private func customModeFieldChanged(_ sender: NSTextField) {
+        let index = sender.tag / 100
+        guard index < customModesData.count else { return }
+        customModesData[index]["name"] = sender.stringValue
+        // Also update the id based on name if it's a new mode
+        let currentId = customModesData[index]["id"] ?? ""
+        if currentId.hasPrefix("custom_") {
+            let sanitizedName = sender.stringValue.lowercased().replacingOccurrences(of: " ", with: "_")
+            if !sanitizedName.isEmpty {
+                customModesData[index]["id"] = "custom_\(sanitizedName)"
+            }
+        }
+    }
+
+    @objc private func customModeIconChanged(_ sender: NSPopUpButton) {
+        let index = sender.tag / 100
+        guard index < customModesData.count else { return }
+        let availableIcons = ["star", "envelope", "doc.text", "globe", "hammer", "wrench", "lightbulb", "book", "pencil", "text.bubble", "brain.head.profile", "list.bullet"]
+        let iconIndex = sender.indexOfSelectedItem
+        if iconIndex < availableIcons.count {
+            customModesData[index]["icon"] = availableIcons[iconIndex]
+        }
+    }
+
+    @objc private func deleteCustomMode(_ sender: NSButton) {
+        let index = sender.tag
+        guard index < customModesData.count else { return }
+        customModesData.remove(at: index)
+        refreshModesUI()
     }
 
     private func setupLogsTab() {
@@ -961,6 +1175,18 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
             pttKeyPopup.selectItem(at: pttIndex)
         }
 
+        // Custom vocabulary
+        customVocabularyField.stringValue = config.customVocabulary.joined(separator: ", ")
+
+        // Processing model
+        if let modelIndex = TextProcessor.availableModels.firstIndex(where: { $0.id == config.processingModel }) {
+            processingModelPopup.selectItem(at: modelIndex)
+        }
+
+        // Custom modes
+        customModesData = config.customModes
+        refreshModesUI()
+
         // Reset connection status
         connectionStatusLabel.stringValue = ""
 
@@ -1002,8 +1228,8 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
             connectionStatusLabel.frame = NSRect(x: 160, y: 25, width: 280, height: 20)
         } else {
             testConnectionButton.title = "Test Connection"
-            testConnectionButton.frame = NSRect(x: 20, y: 80, width: 130, height: 32)
-            connectionStatusLabel.frame = NSRect(x: 160, y: 85, width: 280, height: 20)
+            testConnectionButton.frame = NSRect(x: 20, y: 10, width: 130, height: 32)
+            connectionStatusLabel.frame = NSRect(x: 160, y: 15, width: 280, height: 20)
             apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
         }
     }
@@ -1213,6 +1439,18 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         // Preserve existing providerApiKeys if they exist
         let existingProviderKeys = currentConfig?.providerApiKeys ?? [:]
 
+        // Parse custom vocabulary from comma-separated field
+        let vocabularyText = customVocabularyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let customVocabulary: [String] = vocabularyText.isEmpty ? [] :
+            vocabularyText.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
+        // Filter valid custom modes (must have name and prompt)
+        let validCustomModes = customModesData.filter { mode in
+            let name = mode["name"] ?? ""
+            let prompt = mode["prompt"] ?? ""
+            return !name.isEmpty && !prompt.isEmpty
+        }
+
         // Create new config with all settings
         let newConfig = Config(
             provider: provider.id,
@@ -1223,9 +1461,15 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
             pushToTalkKeyCode: pttKeyCode,
             whisperCliPath: "",  // No longer used, kept for compatibility
             whisperModelPath: modelPath,
-            whisperLanguage: language
+            whisperLanguage: language,
+            customVocabulary: customVocabulary,
+            customModes: validCustomModes,
+            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4o-mini"
         )
         newConfig.save()
+
+        // Reload custom modes in ModeManager
+        ModeManager.shared.reloadModes()
 
         if provider.id == "local" {
             LogManager.shared.log("Settings saved - Provider: Local (whisper.cpp), Model: \(modelPath), Language: \(language)")
@@ -1257,6 +1501,16 @@ class PreferencesWindow: NSObject, NSWindowDelegate {
         notification.title = title
         notification.informativeText = message
         NSUserNotificationCenter.default.deliver(notification)
+    }
+
+    // MARK: - NSTextViewDelegate
+
+    func textDidChange(_ notification: Notification) {
+        guard let textView = notification.object as? NSTextView else { return }
+        // Update prompt text for custom mode
+        if let index = customModePromptViews.firstIndex(where: { $0 === textView }), index < customModesData.count {
+            customModesData[index]["prompt"] = textView.string
+        }
     }
 
     // MARK: - NSWindowDelegate
@@ -1291,6 +1545,15 @@ struct Config {
     var whisperModelPath: String   // Path to ggml model file
     var whisperLanguage: String    // Language code (e.g., "fr", "en", "auto")
 
+    // Custom vocabulary for better recognition
+    var customVocabulary: [String]
+
+    // Custom processing modes
+    var customModes: [[String: String]]
+
+    // LLM model for AI processing modes
+    var processingModel: String
+
     static func load() -> Config? {
         guard let data = try? Data(contentsOf: configPath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1317,6 +1580,15 @@ struct Config {
         let whisperModelPath = json["whisperModelPath"] as? String ?? ""
         let whisperLanguage = json["whisperLanguage"] as? String ?? "fr"
 
+        // Custom vocabulary
+        let customVocabulary = json["customVocabulary"] as? [String] ?? []
+
+        // Custom modes
+        let customModes = json["customModes"] as? [[String: String]] ?? []
+
+        // Processing model
+        let processingModel = json["processingModel"] as? String ?? "gpt-4o-mini"
+
         return Config(
             provider: provider,
             apiKey: apiKey,
@@ -1326,7 +1598,10 @@ struct Config {
             pushToTalkKeyCode: pttKeyCode,
             whisperCliPath: whisperCliPath,
             whisperModelPath: whisperModelPath,
-            whisperLanguage: whisperLanguage
+            whisperLanguage: whisperLanguage,
+            customVocabulary: customVocabulary,
+            customModes: customModes,
+            processingModel: processingModel
         )
     }
 
@@ -1350,6 +1625,15 @@ struct Config {
         }
         if !whisperLanguage.isEmpty {
             json["whisperLanguage"] = whisperLanguage
+        }
+        if !customVocabulary.isEmpty {
+            json["customVocabulary"] = customVocabulary
+        }
+        if !customModes.isEmpty {
+            json["customModes"] = customModes
+        }
+        if processingModel != "gpt-4o-mini" {
+            json["processingModel"] = processingModel
         }
         if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
             try? data.write(to: Config.configPath)
@@ -1417,6 +1701,10 @@ struct ProcessingMode {
 class ModeManager {
     static let shared = ModeManager()
 
+    private init() {
+        reloadModes()
+    }
+
     /// Check if OpenAI API key is configured for AI processing modes
     var hasOpenAIKey: Bool {
         guard let config = Config.load() else { return false }
@@ -1442,7 +1730,7 @@ class ModeManager {
         return nil
     }
 
-    let modes: [ProcessingMode] = [
+    static let builtInModes: [ProcessingMode] = [
         ProcessingMode(
             id: "voice-to-text",
             name: "Brut",
@@ -1470,10 +1758,11 @@ class ModeManager {
             systemPrompt: """
             Tu es un assistant qui transforme des transcriptions vocales en texte professionnel.
             Règles:
-            - Adopte un ton formel et professionnel
+            - Adopte un ton professionnel et structuré
             - Corrige grammaire, ponctuation, majuscules
             - Structure le texte si nécessaire (paragraphes)
             - Garde le message original intact
+            - Ne change PAS le tutoiement en vouvoiement (et inversement). Respecte le registre d'adresse original.
             - Réponds UNIQUEMENT avec le texte transformé, rien d'autre
             """
         ),
@@ -1505,13 +1794,48 @@ class ModeManager {
             - Corrige grammaire et ponctuation
             - Réponds UNIQUEMENT avec le texte en Markdown, rien d'autre
             """
+        ),
+        ProcessingMode(
+            id: "super",
+            name: "Super",
+            icon: "bolt.fill",
+            systemPrompt: "dynamic"  // Placeholder - actual prompt is built dynamically with context
         )
     ]
+
+    private(set) var modes: [ProcessingMode] = ModeManager.builtInModes
 
     private(set) var currentModeIndex: Int = 0
 
     var currentMode: ProcessingMode {
         modes[currentModeIndex]
+    }
+
+    /// Number of built-in modes (for reference in UI)
+    var builtInModeCount: Int { ModeManager.builtInModes.count }
+
+    /// Reload modes from config (built-in + custom modes)
+    func reloadModes() {
+        var allModes = ModeManager.builtInModes
+
+        // Load custom modes from config
+        if let config = Config.load() {
+            for modeDict in config.customModes {
+                guard let id = modeDict["id"], !id.isEmpty,
+                      let name = modeDict["name"], !name.isEmpty,
+                      let prompt = modeDict["prompt"], !prompt.isEmpty else { continue }
+                let icon = modeDict["icon"] ?? "star"
+                let mode = ProcessingMode(id: id, name: name, icon: icon, systemPrompt: prompt)
+                allModes.append(mode)
+            }
+        }
+
+        modes = allModes
+
+        // Reset index if out of bounds
+        if currentModeIndex >= modes.count {
+            currentModeIndex = 0
+        }
     }
 
     /// Check if a mode is available (AI modes require OpenAI key)
@@ -1565,10 +1889,25 @@ class ModeManager {
 class TextProcessor {
     static let shared = TextProcessor()
 
-    private let model = "gpt-4o-mini"
     private let endpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
 
+    /// Available LLM models for processing
+    static let availableModels: [(id: String, name: String)] = [
+        ("gpt-4o-mini", "GPT-4o Mini (rapide, économique)"),
+        ("gpt-4o", "GPT-4o (meilleur, plus cher)"),
+        ("gpt-4.1-mini", "GPT-4.1 Mini"),
+        ("gpt-4.1", "GPT-4.1 (premium)")
+    ]
+
+    private var model: String {
+        Config.load()?.processingModel ?? "gpt-4o-mini"
+    }
+
     func process(text: String, mode: ProcessingMode, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
+        process(text: text, mode: mode, context: nil, apiKey: apiKey, completion: completion)
+    }
+
+    func process(text: String, mode: ProcessingMode, context: String?, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
         guard let systemPrompt = mode.systemPrompt else {
             // No processing needed
             completion(.success(text))
@@ -1577,8 +1916,29 @@ class TextProcessor {
 
         LogManager.shared.log("[TextProcessor] Processing with mode: \(mode.name)")
 
+        // Build system prompt - for Super mode with context, use dynamic prompt
+        let effectivePrompt: String
+        if mode.id == "super", let context = context, !context.isEmpty {
+            effectivePrompt = """
+            Tu es un assistant intelligent. L'utilisateur a sélectionné le texte suivant :
+            ---
+            \(context)
+            ---
+            Il te donne une instruction vocale à appliquer sur ce texte.
+            Réponds UNIQUEMENT avec le résultat, rien d'autre.
+            """
+        } else if mode.id == "super" {
+            // Super mode without context - act as general assistant
+            effectivePrompt = """
+            Tu es un assistant intelligent. L'utilisateur te donne une instruction vocale.
+            Réponds UNIQUEMENT avec le résultat demandé, rien d'autre.
+            """
+        } else {
+            effectivePrompt = systemPrompt
+        }
+
         let messages: [[String: String]] = [
-            ["role": "system", "content": systemPrompt],
+            ["role": "system", "content": effectivePrompt],
             ["role": "user", "content": text]
         ]
 
@@ -2464,6 +2824,13 @@ protocol TranscriptionProvider {
 
     func validateApiKeyFormat(_ apiKey: String) -> (valid: Bool, errorMessage: String?)
     func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void)
+    func transcribe(audioURL: URL, prompt: String?, completion: @escaping (Result<String, Error>) -> Void)
+}
+
+extension TranscriptionProvider {
+    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+        transcribe(audioURL: audioURL, prompt: nil, completion: completion)
+    }
 }
 
 // MARK: - Provider Info (for UI)
@@ -2510,13 +2877,20 @@ class BaseTranscriptionProvider {
         return nil
     }
 
-    func createMultipartBody(boundary: String, audioData: Data, model: String) -> Data {
+    func createMultipartBody(boundary: String, audioData: Data, model: String, prompt: String? = nil) -> Data {
         var body = Data()
 
         // Model field
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
         body.append("\(model)\r\n".data(using: .utf8)!)
+
+        // Prompt field (custom vocabulary)
+        if let prompt = prompt, !prompt.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(prompt)\r\n".data(using: .utf8)!)
+        }
 
         // Audio file
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -2550,11 +2924,11 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
         return (true, nil)
     }
 
-    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
-        transcribeWithRetry(audioURL: audioURL, attempt: 1, completion: completion)
+    func transcribe(audioURL: URL, prompt: String?, completion: @escaping (Result<String, Error>) -> Void) {
+        transcribeWithRetry(audioURL: audioURL, prompt: prompt, attempt: 1, completion: completion)
     }
 
-    private func transcribeWithRetry(audioURL: URL, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
+    private func transcribeWithRetry(audioURL: URL, prompt: String?, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
         LogManager.shared.log("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries)")
 
         if let error = validateAudioFile(audioURL) {
@@ -2575,7 +2949,7 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
             return
         }
 
-        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model)
+        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model, prompt: prompt)
 
         LogManager.shared.log("[\(self.displayName)] Sending request (attempt \(attempt))...")
 
@@ -2591,7 +2965,7 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
                 if attempt < self.maxRetries {
                     LogManager.shared.log("[\(self.displayName)] Retrying in 1 second...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
+                        self.transcribeWithRetry(audioURL: audioURL, prompt: prompt, attempt: attempt + 1, completion: completion)
                     }
                 } else {
                     completion(.failure(error))
@@ -2605,7 +2979,7 @@ class OpenAIProvider: BaseTranscriptionProvider, TranscriptionProvider {
                 if httpResponse.statusCode >= 500 && attempt < self.maxRetries {
                     LogManager.shared.log("[\(self.displayName)] Server error, retrying...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
+                        self.transcribeWithRetry(audioURL: audioURL, prompt: prompt, attempt: attempt + 1, completion: completion)
                     }
                     return
                 }
@@ -2656,11 +3030,11 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
         return (true, nil)
     }
 
-    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
-        transcribeWithRetry(audioURL: audioURL, attempt: 1, completion: completion)
+    func transcribe(audioURL: URL, prompt: String?, completion: @escaping (Result<String, Error>) -> Void) {
+        transcribeWithRetry(audioURL: audioURL, prompt: prompt, attempt: 1, completion: completion)
     }
 
-    private func transcribeWithRetry(audioURL: URL, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
+    private func transcribeWithRetry(audioURL: URL, prompt: String?, attempt: Int, completion: @escaping (Result<String, Error>) -> Void) {
         LogManager.shared.log("[\(self.displayName)] Transcription attempt \(attempt)/\(self.maxRetries)")
 
         if let error = validateAudioFile(audioURL) {
@@ -2682,7 +3056,7 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
             return
         }
 
-        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model)
+        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model, prompt: prompt)
 
         LogManager.shared.log("[\(self.displayName)] Sending request (attempt \(attempt))...")
 
@@ -2698,7 +3072,7 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
                 if attempt < self.maxRetries {
                     LogManager.shared.log("[\(self.displayName)] Retrying in 1 second...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
+                        self.transcribeWithRetry(audioURL: audioURL, prompt: prompt, attempt: attempt + 1, completion: completion)
                     }
                 } else {
                     completion(.failure(error))
@@ -2712,7 +3086,7 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
                 if httpResponse.statusCode >= 500 && attempt < self.maxRetries {
                     LogManager.shared.log("[\(self.displayName)] Server error, retrying...")
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-                        self.transcribeWithRetry(audioURL: audioURL, attempt: attempt + 1, completion: completion)
+                        self.transcribeWithRetry(audioURL: audioURL, prompt: prompt, attempt: attempt + 1, completion: completion)
                     }
                     return
                 }
@@ -3054,7 +3428,7 @@ class WhisperServerManager {
         }
     }
 
-    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+    func transcribe(audioURL: URL, prompt: String? = nil, completion: @escaping (Result<String, Error>) -> Void) {
         let inferenceURL = serverURL.appendingPathComponent("inference")
 
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
@@ -3079,6 +3453,13 @@ class WhisperServerManager {
         body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
+
+        // Add prompt (custom vocabulary) if provided
+        if let prompt = prompt, !prompt.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(prompt)\r\n".data(using: .utf8)!)
+        }
 
         // Add response format
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -3180,7 +3561,7 @@ class LocalWhisperProvider: TranscriptionProvider {
         return (true, nil)
     }
 
-    func transcribe(audioURL: URL, completion: @escaping (Result<String, Error>) -> Void) {
+    func transcribe(audioURL: URL, prompt: String?, completion: @escaping (Result<String, Error>) -> Void) {
         LogManager.shared.log("[LocalWhisper] Starting transcription...")
 
         // Validate setup first
@@ -3194,7 +3575,7 @@ class LocalWhisperProvider: TranscriptionProvider {
 
         // If server is running, use it directly
         if serverManager.isRunning {
-            serverManager.transcribe(audioURL: audioURL, completion: completion)
+            serverManager.transcribe(audioURL: audioURL, prompt: prompt, completion: completion)
             return
         }
 
@@ -3203,7 +3584,7 @@ class LocalWhisperProvider: TranscriptionProvider {
             guard let self = self else { return }
 
             if success {
-                self.serverManager.transcribe(audioURL: audioURL, completion: completion)
+                self.serverManager.transcribe(audioURL: audioURL, prompt: prompt, completion: completion)
             } else {
                 completion(.failure(NSError(domain: "LocalWhisper", code: -2,
                                            userInfo: [NSLocalizedDescriptionKey: error ?? "Failed to start server"])))
@@ -3284,6 +3665,254 @@ func pasteText(_ text: String) {
     }
 }
 
+// MARK: - Auto Update
+
+struct UpdateInfo {
+    let version: String
+    let downloadURL: URL?
+    let releaseNotes: String
+}
+
+class UpdateChecker {
+    static let currentVersion = "3.2.0"
+    private static let repoOwner = "hugoblanc"
+    private static let repoName = "whisper-voice"
+
+    static func checkForUpdates(completion: @escaping (UpdateInfo?) -> Void) {
+        let urlString = "https://api.github.com/repos/\(repoOwner)/\(repoName)/releases/latest"
+        guard let url = URL(string: urlString) else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 15
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            // Parse version from tag (e.g., "v3.2.0" -> "3.2.0")
+            let remoteVersion = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
+
+            // Compare versions
+            guard isVersion(remoteVersion, newerThan: currentVersion) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            // Find DMG download URL from assets
+            let downloadURL: URL? = {
+                guard let assets = json["assets"] as? [[String: Any]] else { return nil }
+                for asset in assets {
+                    if let name = asset["name"] as? String, name.hasSuffix(".dmg"),
+                       let urlStr = asset["browser_download_url"] as? String,
+                       let url = URL(string: urlStr) {
+                        return url
+                    }
+                }
+                return nil
+            }()
+
+            let releaseNotes = json["body"] as? String ?? ""
+
+            DispatchQueue.main.async {
+                completion(UpdateInfo(version: remoteVersion, downloadURL: downloadURL, releaseNotes: releaseNotes))
+            }
+        }.resume()
+    }
+
+    private static func isVersion(_ v1: String, newerThan v2: String) -> Bool {
+        let parts1 = v1.split(separator: ".").compactMap { Int($0) }
+        let parts2 = v2.split(separator: ".").compactMap { Int($0) }
+        let maxCount = max(parts1.count, parts2.count)
+
+        for i in 0..<maxCount {
+            let p1 = i < parts1.count ? parts1[i] : 0
+            let p2 = i < parts2.count ? parts2[i] : 0
+            if p1 > p2 { return true }
+            if p1 < p2 { return false }
+        }
+        return false
+    }
+}
+
+class UpdateWindow: NSObject, URLSessionDownloadDelegate {
+    private var window: NSWindow!
+    private var progressBar: NSProgressIndicator!
+    private var statusLabel: NSTextField!
+    private var downloadButton: NSButton!
+    private var laterButton: NSButton!
+    private let updateInfo: UpdateInfo
+    private var downloadTask: URLSessionDownloadTask?
+
+    init(updateInfo: UpdateInfo) {
+        self.updateInfo = updateInfo
+        super.init()
+        setupWindow()
+    }
+
+    private func setupWindow() {
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Update Available"
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        guard let contentView = window.contentView else { return }
+        contentView.wantsLayer = true
+
+        // Title
+        let titleLabel = NSTextField(labelWithString: "Whisper Voice v\(updateInfo.version) is available!")
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 15)
+        titleLabel.frame = NSRect(x: 20, y: 260, width: 380, height: 25)
+        contentView.addSubview(titleLabel)
+
+        let currentLabel = NSTextField(labelWithString: "You are currently running v\(UpdateChecker.currentVersion)")
+        currentLabel.font = NSFont.systemFont(ofSize: 12)
+        currentLabel.textColor = .secondaryLabelColor
+        currentLabel.frame = NSRect(x: 20, y: 238, width: 380, height: 20)
+        contentView.addSubview(currentLabel)
+
+        // Release notes
+        let notesLabel = NSTextField(labelWithString: "Release Notes:")
+        notesLabel.font = NSFont.boldSystemFont(ofSize: 12)
+        notesLabel.frame = NSRect(x: 20, y: 212, width: 380, height: 18)
+        contentView.addSubview(notesLabel)
+
+        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 90, width: 380, height: 120))
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+
+        let notesTextView = NSTextView(frame: scrollView.bounds)
+        notesTextView.string = updateInfo.releaseNotes.isEmpty ? "No release notes available." : updateInfo.releaseNotes
+        notesTextView.isEditable = false
+        notesTextView.font = NSFont.systemFont(ofSize: 12)
+        notesTextView.autoresizingMask = [.width, .height]
+        scrollView.documentView = notesTextView
+        contentView.addSubview(scrollView)
+
+        // Progress bar (hidden initially)
+        progressBar = NSProgressIndicator(frame: NSRect(x: 20, y: 62, width: 380, height: 20))
+        progressBar.style = .bar
+        progressBar.minValue = 0
+        progressBar.maxValue = 1
+        progressBar.isHidden = true
+        contentView.addSubview(progressBar)
+
+        // Status label
+        statusLabel = NSTextField(labelWithString: "")
+        statusLabel.frame = NSRect(x: 20, y: 42, width: 380, height: 18)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        contentView.addSubview(statusLabel)
+
+        // Buttons
+        laterButton = NSButton(title: "Later", target: self, action: #selector(laterClicked))
+        laterButton.bezelStyle = .rounded
+        laterButton.frame = NSRect(x: 220, y: 10, width: 80, height: 32)
+        contentView.addSubview(laterButton)
+
+        downloadButton = NSButton(title: "Download & Install", target: self, action: #selector(downloadClicked))
+        downloadButton.bezelStyle = .rounded
+        downloadButton.frame = NSRect(x: 310, y: 10, width: 100, height: 32)
+        downloadButton.keyEquivalent = "\r"
+        contentView.addSubview(downloadButton)
+
+        if updateInfo.downloadURL == nil {
+            downloadButton.isEnabled = false
+            statusLabel.stringValue = "No DMG download available for this release."
+        }
+    }
+
+    func show() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func laterClicked() {
+        downloadTask?.cancel()
+        window.close()
+    }
+
+    @objc private func downloadClicked() {
+        guard let downloadURL = updateInfo.downloadURL else { return }
+
+        downloadButton.isEnabled = false
+        laterButton.title = "Cancel"
+        progressBar.isHidden = false
+        progressBar.doubleValue = 0
+        statusLabel.stringValue = "Downloading..."
+
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+        downloadTask = session.downloadTask(with: downloadURL)
+        downloadTask?.resume()
+    }
+
+    // MARK: - URLSessionDownloadDelegate
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let destURL = FileManager.default.temporaryDirectory.appendingPathComponent("WhisperVoice-\(updateInfo.version).dmg")
+
+        // Remove existing file if present
+        try? FileManager.default.removeItem(at: destURL)
+
+        do {
+            try FileManager.default.moveItem(at: location, to: destURL)
+            statusLabel.stringValue = "Download complete! Opening DMG..."
+            LogManager.shared.log("[Update] Downloaded update to \(destURL.path)")
+
+            // Open the DMG
+            NSWorkspace.shared.open(destURL)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.statusLabel.stringValue = "Drag Whisper Voice to Applications to complete the update."
+                self.downloadButton.title = "Done"
+                self.downloadButton.isEnabled = true
+                self.downloadButton.target = self
+                self.downloadButton.action = #selector(self.laterClicked)
+            }
+        } catch {
+            statusLabel.stringValue = "Failed to save download: \(error.localizedDescription)"
+            downloadButton.isEnabled = true
+            LogManager.shared.log("[Update] Failed to save DMG: \(error.localizedDescription)", level: "ERROR")
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        if totalBytesExpectedToWrite > 0 {
+            let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+            progressBar.doubleValue = progress
+            let mb = Double(totalBytesWritten) / 1_000_000
+            let totalMb = Double(totalBytesExpectedToWrite) / 1_000_000
+            statusLabel.stringValue = String(format: "Downloading... %.1f / %.1f MB", mb, totalMb)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error as? URLError, error.code == .cancelled {
+            statusLabel.stringValue = "Download cancelled."
+            progressBar.isHidden = true
+            downloadButton.isEnabled = true
+            laterButton.title = "Later"
+        } else if let error = error {
+            statusLabel.stringValue = "Download failed: \(error.localizedDescription)"
+            progressBar.isHidden = true
+            downloadButton.isEnabled = true
+            laterButton.title = "Later"
+        }
+    }
+}
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -3320,6 +3949,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // History window
     private var historyWindow: HistoryWindow?
 
+    // Update window
+    private var updateWindow: UpdateWindow?
+
     // Recording start time for duration tracking
     private var recordingStartTime: Date?
 
@@ -3332,6 +3964,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var state: AppState = .idle
     private var isPushToTalkActive = false  // Track if current recording is from PTT
+    private var capturedContext: String?  // Context captured for Super Mode
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Load config or show setup wizard
@@ -3403,8 +4036,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "History...", action: #selector(showHistory), keyEquivalent: "h"))
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Check Permissions...", action: #selector(showPermissionStatus), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Version 2.4.0", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Version \(UpdateChecker.currentVersion)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -3415,6 +4049,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         LogManager.shared.log("App started - Provider: \(transcriptionProvider?.displayName ?? "unknown")")
         print("Whisper Voice started (dual mode: toggle + push-to-talk)")
+
+        // Silent update check on launch
+        checkForUpdatesSilently()
     }
 
     // Store selected provider info for link button
@@ -3547,7 +4184,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 pushToTalkKeyCode: pttKeyCode,
                 whisperCliPath: "",
                 whisperModelPath: "",
-                whisperLanguage: "fr"
+                whisperLanguage: "fr",
+                customVocabulary: [],
+                customModes: [],
+                processingModel: "gpt-4o-mini"
             )
             config.save()
 
@@ -3778,8 +4418,60 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Capture currently selected text in the active app by simulating Cmd+C
+    private func captureSelectedText() -> String? {
+        let pasteboard = NSPasteboard.general
+
+        // Save current clipboard contents
+        let savedItems = pasteboard.pasteboardItems?.compactMap { item -> (String, Data)? in
+            guard let type = item.types.first, let data = item.data(forType: type) else { return nil }
+            return (type.rawValue, data)
+        } ?? []
+
+        // Clear clipboard
+        pasteboard.clearContents()
+
+        // Simulate Cmd+C to copy selection
+        let source = CGEventSource(stateID: .hidSystemState)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)
+        keyDown?.flags = .maskCommand
+        keyUp?.flags = .maskCommand
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
+
+        // Wait for clipboard to update
+        Thread.sleep(forTimeInterval: 0.15)
+
+        // Read the new clipboard content
+        let capturedText = pasteboard.string(forType: .string)
+
+        // Restore original clipboard
+        pasteboard.clearContents()
+        if !savedItems.isEmpty {
+            for (typeRaw, data) in savedItems {
+                let type = NSPasteboard.PasteboardType(rawValue: typeRaw)
+                pasteboard.setData(data, forType: type)
+            }
+        }
+
+        if let text = capturedText, !text.isEmpty {
+            LogManager.shared.log("[SuperMode] Captured context: \(text.prefix(100))...")
+            return text
+        }
+
+        LogManager.shared.log("[SuperMode] No text selection captured")
+        return nil
+    }
+
     private func startRecording(showStopMessage: Bool) {
         LogManager.shared.log("Starting recording (showStopMessage: \(showStopMessage))")
+
+        // Capture context for Super Mode before starting recording
+        capturedContext = nil
+        if ModeManager.shared.currentMode.id == "super" {
+            capturedContext = captureSelectedText()
+        }
 
         guard audioRecorder.startRecording() else {
             LogManager.shared.log("Failed to start recording", level: "ERROR")
@@ -3842,7 +4534,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        transcriptionProvider?.transcribe(audioURL: audioURL) { [weak self] result in
+        // Build prompt from custom vocabulary
+        let vocabPrompt: String? = {
+            guard let vocab = self.config?.customVocabulary, !vocab.isEmpty else { return nil }
+            let prompt = vocab.joined(separator: ", ")
+            LogManager.shared.log("Using custom vocabulary prompt: \(prompt)")
+            return prompt
+        }()
+
+        transcriptionProvider?.transcribe(audioURL: audioURL, prompt: vocabPrompt) { [weak self] result in
             DispatchQueue.main.async {
                 // Cancel safety timeout
                 self?.transcriptionTimeoutTimer?.invalidate()
@@ -3869,7 +4569,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         }
 
                         // Process with GPT
-                        TextProcessor.shared.process(text: text, mode: mode, apiKey: apiKey) { processResult in
+                        TextProcessor.shared.process(text: text, mode: mode, context: self?.capturedContext, apiKey: apiKey) { processResult in
                             DispatchQueue.main.async {
                                 switch processResult {
                                 case .success(let processedText):
@@ -3899,16 +4599,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishWithText(_ text: String) {
+        // Trim leading/trailing whitespace before pasting
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
         // Save to history
         let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
         let provider = config?.provider ?? "unknown"
         let modeName = selectedModeForCurrentRecording?.name ?? "Voice-to-Text"
-        let entry = TranscriptionEntry(text: text, durationSeconds: duration, provider: "\(provider) + \(modeName)")
+        let entry = TranscriptionEntry(text: trimmedText, durationSeconds: duration, provider: "\(provider) + \(modeName)")
         HistoryManager.shared.addEntry(entry)
 
         // Play completion sound
         NSSound(named: "Glass")?.play()
-        pasteText(text)
+        pasteText(trimmedText)
 
         state = .idle
         updateStatusIcon()
@@ -4096,6 +4799,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             reloadHotkeys()
         }
 
+        // Recreate recording window to pick up new modes
+        recordingWindow = nil
+
         updateMenuDescriptions()
         LogManager.shared.log("Settings reloaded successfully")
     }
@@ -4131,6 +4837,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let config = config else { return }
         toggleShortcutMenuItem?.title = "\(config.toggleShortcutDescription()) to toggle"
         pttMenuItem?.title = "\(config.pushToTalkDescription()) to record"
+    }
+
+    @objc private func checkForUpdates() {
+        LogManager.shared.log("[Update] Checking for updates...")
+        UpdateChecker.checkForUpdates { [weak self] updateInfo in
+            if let info = updateInfo {
+                LogManager.shared.log("[Update] New version available: \(info.version)")
+                self?.updateWindow = UpdateWindow(updateInfo: info)
+                self?.updateWindow?.show()
+            } else {
+                LogManager.shared.log("[Update] Already up to date")
+                self?.showNotification(title: "Whisper Voice", message: "You're running the latest version (\(UpdateChecker.currentVersion))")
+            }
+        }
+    }
+
+    private func checkForUpdatesSilently() {
+        UpdateChecker.checkForUpdates { [weak self] updateInfo in
+            if let info = updateInfo {
+                LogManager.shared.log("[Update] New version available: \(info.version)")
+                self?.updateWindow = UpdateWindow(updateInfo: info)
+                self?.updateWindow?.show()
+            }
+        }
     }
 
     @objc private func quit() {

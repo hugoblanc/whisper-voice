@@ -14,7 +14,7 @@ Native Swift app supporting **OpenAI Whisper**, **Mistral Voxtral**, and **Local
 
 ### Easy Install (Recommended)
 
-1. **[Download WhisperVoice-3.1.0.dmg](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.1.0.dmg)**
+1. **[Download for Apple Silicon (M1/M2/M3)](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.2.0-AppleSilicon.dmg)** | **[Download for Intel](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.2.0-Intel.dmg)**
 2. Open the DMG file
 3. Drag **Whisper Voice** to your Applications folder
 4. Launch the app - a setup wizard will guide you
@@ -62,8 +62,9 @@ Switch modes by pressing **Shift** during recording:
 | **Formel** | Professional tone, proper structure |
 | **Casual** | Natural, friendly tone |
 | **Markdown** | Converts to headers, lists, code blocks |
+| **Super** | Select text, speak an instruction, AI transforms it |
 
-> AI modes require an OpenAI API key (uses GPT-4o-mini for processing)
+> AI modes require an OpenAI API key (configurable model: GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1)
 
 ### Transcription History
 - **Cmd+H** to open history window
@@ -71,9 +72,19 @@ Switch modes by pressing **Shift** during recording:
 - Copy or delete entries
 - Shows provider and mode used
 
+### Custom Vocabulary
+Add proper nouns and technical terms (e.g., "PostHog", "Kubernetes") in Preferences to improve transcription accuracy across all providers.
+
+### Custom Modes
+Create your own processing modes with custom system prompts. Define a name, icon, and prompt — they appear alongside built-in modes during recording.
+
+### Auto-Update
+The app checks for updates on launch and you can manually check via the menu bar. Downloads and installs new versions directly from GitHub Releases.
+
 ### Other Features
 - **Multi-provider support**: OpenAI, Mistral, or Local (whisper.cpp)
 - **Offline mode**: 100% local transcription with whisper.cpp
+- **Configurable LLM model**: Choose between GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1
 - **Preferences window**: Change settings without editing config (Cmd+,)
 - **Built-in logs**: Debug issues from Preferences → Logs tab
 - **Setup wizard**: Guided first-time configuration
@@ -224,6 +235,14 @@ whisper-voice/
 ```
 
 ---
+
+## What's New in v3.2
+
+- **Super Mode**: Select text, speak an instruction, AI transforms it in place
+- **Custom Vocabulary**: Add proper nouns/technical terms for better recognition
+- **Custom Modes**: Create your own processing modes with custom prompts
+- **Auto-Update**: Check for updates and install directly from the app
+- **LLM Model Choice**: Pick between GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1
 
 ## What's New in v3.1
 
