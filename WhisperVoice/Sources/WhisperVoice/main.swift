@@ -582,6 +582,9 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     // Processing model
     private var processingModelPopup: NSPopUpButton!
 
+    // Launch at login
+    private var launchAtLoginCheckbox: NSButton!
+
     // Shortcuts tab elements
     private var toggleShortcutPopup: NSPopUpButton!
     private var pttKeyPopup: NSPopUpButton!
@@ -590,6 +593,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     private var modesContainer: NSView!
     private var customModesData: [[String: String]] = []
     private var customModePromptViews: [NSTextView] = []
+    private var customModeNameFields: [NSTextField] = []
 
     // Logs tab elements
     private var logsTextView: NSTextView!
@@ -771,6 +775,12 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         infoLabel.font = NSFont.systemFont(ofSize: 11)
         localSettingsContainer.addSubview(infoLabel)
 
+        // Launch at login checkbox
+        launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
+        launchAtLoginCheckbox.frame = NSRect(x: 20, y: 45, width: 200, height: 20)
+        launchAtLoginCheckbox.font = NSFont.systemFont(ofSize: 12)
+        view.addSubview(launchAtLoginCheckbox)
+
         // Test connection button
         testConnectionButton = NSButton(title: "Test Connection", target: self, action: #selector(testConnectionClicked))
         testConnectionButton.bezelStyle = .rounded
@@ -921,7 +931,8 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             "id": "custom_\(Int(Date().timeIntervalSince1970))",
             "name": "",
             "icon": "star",
-            "prompt": ""
+            "prompt": "",
+            "enabled": "true"
         ]
         customModesData.append(newMode)
         refreshModesUI()
@@ -931,8 +942,9 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         // Clear existing subviews and tracked views
         modesContainer.subviews.forEach { $0.removeFromSuperview() }
         customModePromptViews.removeAll()
+        customModeNameFields.removeAll()
 
-        let modeHeight: CGFloat = 120
+        let modeHeight: CGFloat = 140
         let spacing: CGFloat = 10
         let totalHeight = max(CGFloat(customModesData.count) * (modeHeight + spacing) + 10, modesContainer.enclosingScrollView?.frame.height ?? 250)
         modesContainer.frame = NSRect(x: 0, y: 0, width: 420, height: totalHeight)
@@ -943,6 +955,8 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         for (index, modeData) in customModesData.enumerated() {
             let yPos = totalHeight - CGFloat(index + 1) * (modeHeight + spacing)
 
+            let isEnabled = (modeData["enabled"] ?? "true") == "true"
+
             // Mode card container
             let card = NSView(frame: NSRect(x: 5, y: yPos, width: 395, height: modeHeight))
             card.wantsLayer = true
@@ -951,13 +965,21 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             card.layer?.borderWidth = 1
             card.layer?.borderColor = NSColor.separatorColor.cgColor
 
+            // Enable/Disable checkbox
+            let enableCheckbox = NSButton(checkboxWithTitle: "Activé", target: self, action: #selector(customModeEnabledChanged(_:)))
+            enableCheckbox.frame = NSRect(x: 10, y: 110, width: 80, height: 20)
+            enableCheckbox.font = NSFont.systemFont(ofSize: 11)
+            enableCheckbox.state = isEnabled ? .on : .off
+            enableCheckbox.tag = index
+            card.addSubview(enableCheckbox)
+
             // Name field
             let nameLabel = NSTextField(labelWithString: "Name:")
-            nameLabel.frame = NSRect(x: 10, y: 90, width: 45, height: 20)
+            nameLabel.frame = NSRect(x: 100, y: 110, width: 45, height: 20)
             nameLabel.font = NSFont.systemFont(ofSize: 11)
             card.addSubview(nameLabel)
 
-            let nameField = NSTextField(frame: NSRect(x: 55, y: 88, width: 120, height: 22))
+            let nameField = NSTextField(frame: NSRect(x: 145, y: 108, width: 100, height: 22))
             nameField.stringValue = modeData["name"] ?? ""
             nameField.placeholderString = "Email"
             nameField.font = NSFont.systemFont(ofSize: 11)
@@ -968,11 +990,11 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
             // Icon popup
             let iconLabel = NSTextField(labelWithString: "Icon:")
-            iconLabel.frame = NSRect(x: 185, y: 90, width: 35, height: 20)
+            iconLabel.frame = NSRect(x: 255, y: 110, width: 35, height: 20)
             iconLabel.font = NSFont.systemFont(ofSize: 11)
             card.addSubview(iconLabel)
 
-            let iconPopup = NSPopUpButton(frame: NSRect(x: 220, y: 87, width: 110, height: 22))
+            let iconPopup = NSPopUpButton(frame: NSRect(x: 290, y: 107, width: 65, height: 22))
             iconPopup.font = NSFont.systemFont(ofSize: 11)
             for icon in availableIcons {
                 iconPopup.addItem(withTitle: icon)
@@ -988,21 +1010,21 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             // Delete button
             let deleteButton = NSButton(title: "✕", target: self, action: #selector(deleteCustomMode(_:)))
             deleteButton.bezelStyle = .inline
-            deleteButton.frame = NSRect(x: 360, y: 88, width: 25, height: 22)
+            deleteButton.frame = NSRect(x: 365, y: 108, width: 25, height: 22)
             deleteButton.tag = index
             card.addSubview(deleteButton)
 
             // Prompt text area
             let promptLabel = NSTextField(labelWithString: "System Prompt:")
-            promptLabel.frame = NSRect(x: 10, y: 62, width: 100, height: 16)
+            promptLabel.frame = NSRect(x: 10, y: 82, width: 100, height: 16)
             promptLabel.font = NSFont.systemFont(ofSize: 11)
             card.addSubview(promptLabel)
 
-            let promptScrollView = NSScrollView(frame: NSRect(x: 10, y: 5, width: 375, height: 55))
+            let promptScrollView = NSScrollView(frame: NSRect(x: 10, y: 5, width: 375, height: 75))
             promptScrollView.hasVerticalScroller = true
             promptScrollView.borderType = .bezelBorder
 
-            let promptTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 375, height: 55))
+            let promptTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 375, height: 75))
             promptTextView.string = modeData["prompt"] ?? ""
             promptTextView.font = NSFont.systemFont(ofSize: 11)
             promptTextView.isEditable = true
@@ -1013,8 +1035,14 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             promptScrollView.documentView = promptTextView
             card.addSubview(promptScrollView)
 
-            // Track this text view for delegate callback
+            // Track fields for syncing before save
+            customModeNameFields.append(nameField)
             customModePromptViews.append(promptTextView)
+
+            // Visual dimming when disabled
+            if !isEnabled {
+                card.alphaValue = 0.5
+            }
 
             modesContainer.addSubview(card)
         }
@@ -1051,6 +1079,13 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         if iconIndex < availableIcons.count {
             customModesData[index]["icon"] = availableIcons[iconIndex]
         }
+    }
+
+    @objc private func customModeEnabledChanged(_ sender: NSButton) {
+        let index = sender.tag
+        guard index < customModesData.count else { return }
+        customModesData[index]["enabled"] = sender.state == .on ? "true" : "false"
+        refreshModesUI()
     }
 
     @objc private func deleteCustomMode(_ sender: NSButton) {
@@ -1186,6 +1221,10 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         // Custom modes
         customModesData = config.customModes
         refreshModesUI()
+
+        // Launch at login
+        let launchAgentExists = FileManager.default.fileExists(atPath: AppDelegate.launchAgentPath.path)
+        launchAtLoginCheckbox.state = launchAgentExists ? .on : .off
 
         // Reset connection status
         connectionStatusLabel.stringValue = ""
@@ -1444,6 +1483,15 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         let customVocabulary: [String] = vocabularyText.isEmpty ? [] :
             vocabularyText.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 
+        // Sync name fields from UI (action only fires on Enter, not on Save click)
+        for (index, nameField) in customModeNameFields.enumerated() where index < customModesData.count {
+            customModesData[index]["name"] = nameField.stringValue
+            let sanitizedName = nameField.stringValue.lowercased().replacingOccurrences(of: " ", with: "_")
+            if !sanitizedName.isEmpty {
+                customModesData[index]["id"] = "custom_\(sanitizedName)"
+            }
+        }
+
         // Filter valid custom modes (must have name and prompt)
         let validCustomModes = customModesData.filter { mode in
             let name = mode["name"] ?? ""
@@ -1464,9 +1512,18 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             whisperLanguage: language,
             customVocabulary: customVocabulary,
             customModes: validCustomModes,
-            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4o-mini"
+            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4o-mini",
+            skippedUpdateVersion: currentConfig?.skippedUpdateVersion ?? "",
+            lastUpdateCheck: currentConfig?.lastUpdateCheck ?? 0
         )
         newConfig.save()
+
+        // Update launch at login
+        if launchAtLoginCheckbox.state == .on {
+            (NSApp.delegate as? AppDelegate)?.setupAutoStart()
+        } else {
+            (NSApp.delegate as? AppDelegate)?.removeAutoStart()
+        }
 
         // Reload custom modes in ModeManager
         ModeManager.shared.reloadModes()
@@ -1554,6 +1611,10 @@ struct Config {
     // LLM model for AI processing modes
     var processingModel: String
 
+    // Update tracking
+    var skippedUpdateVersion: String
+    var lastUpdateCheck: Double  // TimeInterval since 1970
+
     static func load() -> Config? {
         guard let data = try? Data(contentsOf: configPath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1583,11 +1644,20 @@ struct Config {
         // Custom vocabulary
         let customVocabulary = json["customVocabulary"] as? [String] ?? []
 
-        // Custom modes
-        let customModes = json["customModes"] as? [[String: String]] ?? []
+        // Custom modes (default enabled = true for backwards compatibility)
+        var customModes = json["customModes"] as? [[String: String]] ?? []
+        customModes = customModes.map { mode in
+            var m = mode
+            if m["enabled"] == nil { m["enabled"] = "true" }
+            return m
+        }
 
         // Processing model
         let processingModel = json["processingModel"] as? String ?? "gpt-4o-mini"
+
+        // Update tracking
+        let skippedUpdateVersion = json["skippedUpdateVersion"] as? String ?? ""
+        let lastUpdateCheck = json["lastUpdateCheck"] as? Double ?? 0
 
         return Config(
             provider: provider,
@@ -1601,7 +1671,9 @@ struct Config {
             whisperLanguage: whisperLanguage,
             customVocabulary: customVocabulary,
             customModes: customModes,
-            processingModel: processingModel
+            processingModel: processingModel,
+            skippedUpdateVersion: skippedUpdateVersion,
+            lastUpdateCheck: lastUpdateCheck
         )
     }
 
@@ -1634,6 +1706,12 @@ struct Config {
         }
         if processingModel != "gpt-4o-mini" {
             json["processingModel"] = processingModel
+        }
+        if !skippedUpdateVersion.isEmpty {
+            json["skippedUpdateVersion"] = skippedUpdateVersion
+        }
+        if lastUpdateCheck > 0 {
+            json["lastUpdateCheck"] = lastUpdateCheck
         }
         if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
             try? data.write(to: Config.configPath)
@@ -1824,6 +1902,9 @@ class ModeManager {
                 guard let id = modeDict["id"], !id.isEmpty,
                       let name = modeDict["name"], !name.isEmpty,
                       let prompt = modeDict["prompt"], !prompt.isEmpty else { continue }
+                // Skip disabled modes
+                let enabled = modeDict["enabled"] ?? "true"
+                guard enabled == "true" else { continue }
                 let icon = modeDict["icon"] ?? "star"
                 let mode = ProcessingMode(id: id, name: name, icon: icon, systemPrompt: prompt)
                 allModes.append(mode)
@@ -3841,6 +3922,11 @@ class UpdateWindow: NSObject, URLSessionDownloadDelegate {
 
     @objc private func laterClicked() {
         downloadTask?.cancel()
+        // Remember skipped version so we don't prompt again until next release
+        if var config = Config.load() {
+            config.skippedUpdateVersion = updateInfo.version
+            config.save()
+        }
         window.close()
     }
 
@@ -3868,24 +3954,109 @@ class UpdateWindow: NSObject, URLSessionDownloadDelegate {
 
         do {
             try FileManager.default.moveItem(at: location, to: destURL)
-            statusLabel.stringValue = "Download complete! Opening DMG..."
+            statusLabel.stringValue = "Installing update..."
             LogManager.shared.log("[Update] Downloaded update to \(destURL.path)")
 
-            // Open the DMG
-            NSWorkspace.shared.open(destURL)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.statusLabel.stringValue = "Drag Whisper Voice to Applications to complete the update."
-                self.downloadButton.title = "Done"
-                self.downloadButton.isEnabled = true
-                self.downloadButton.target = self
-                self.downloadButton.action = #selector(self.laterClicked)
+            // Auto-install from DMG
+            DispatchQueue.global().async { [weak self] in
+                self?.installFromDMG(dmgPath: destURL.path)
             }
         } catch {
             statusLabel.stringValue = "Failed to save download: \(error.localizedDescription)"
             downloadButton.isEnabled = true
             LogManager.shared.log("[Update] Failed to save DMG: \(error.localizedDescription)", level: "ERROR")
         }
+    }
+
+    private func installFromDMG(dmgPath: String) {
+        // 1. Mount DMG silently
+        let mountProcess = Process()
+        mountProcess.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        mountProcess.arguments = ["attach", dmgPath, "-nobrowse", "-plist"]
+        let pipe = Pipe()
+        mountProcess.standardOutput = pipe
+        mountProcess.standardError = FileHandle.nullDevice
+
+        do {
+            try mountProcess.run()
+        } catch {
+            DispatchQueue.main.async {
+                self.statusLabel.stringValue = "Failed to mount DMG."
+                self.downloadButton.isEnabled = true
+            }
+            return
+        }
+        mountProcess.waitUntilExit()
+
+        let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
+
+        // 2. Parse mount point from plist output
+        guard let plist = try? PropertyListSerialization.propertyList(from: outputData, format: nil) as? [String: Any],
+              let entities = plist["system-entities"] as? [[String: Any]],
+              let mountPoint = entities.compactMap({ $0["mount-point"] as? String }).first else {
+            DispatchQueue.main.async {
+                self.statusLabel.stringValue = "Failed to find mounted volume."
+                self.downloadButton.isEnabled = true
+            }
+            return
+        }
+
+        // 3. Find .app in mounted volume
+        let volumeURL = URL(fileURLWithPath: mountPoint)
+        let appName = "Whisper Voice.app"
+        let sourceApp = volumeURL.appendingPathComponent(appName).path
+        let destApp = "/Applications/\(appName)"
+
+        guard FileManager.default.fileExists(atPath: sourceApp) else {
+            // Unmount and fail
+            Process.launchedProcess(launchPath: "/usr/bin/hdiutil", arguments: ["detach", mountPoint, "-quiet"])
+            DispatchQueue.main.async {
+                self.statusLabel.stringValue = "App not found in DMG."
+                self.downloadButton.isEnabled = true
+            }
+            return
+        }
+
+        // 4. Remove old app, copy new one
+        do {
+            if FileManager.default.fileExists(atPath: destApp) {
+                try FileManager.default.removeItem(atPath: destApp)
+            }
+            try FileManager.default.copyItem(atPath: sourceApp, toPath: destApp)
+            LogManager.shared.log("[Update] Installed update to \(destApp)")
+        } catch {
+            Process.launchedProcess(launchPath: "/usr/bin/hdiutil", arguments: ["detach", mountPoint, "-quiet"])
+            DispatchQueue.main.async {
+                self.statusLabel.stringValue = "Failed to install: \(error.localizedDescription)"
+                self.downloadButton.isEnabled = true
+            }
+            return
+        }
+
+        // 5. Unmount DMG
+        Process.launchedProcess(launchPath: "/usr/bin/hdiutil", arguments: ["detach", mountPoint, "-quiet"])
+
+        // 6. UI: propose restart
+        DispatchQueue.main.async {
+            self.progressBar.isHidden = true
+            self.statusLabel.stringValue = "Update installed! Restart to apply."
+            self.downloadButton.title = "Restart"
+            self.downloadButton.isEnabled = true
+            self.downloadButton.target = self
+            self.downloadButton.action = #selector(self.restartApp)
+            self.laterButton.title = "Later"
+        }
+    }
+
+    @objc private func restartApp() {
+        let appPath = "/Applications/Whisper Voice.app"
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            task.arguments = ["-a", appPath]
+            try? task.run()
+        }
+        NSApp.terminate(nil)
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
@@ -4187,7 +4358,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 whisperLanguage: "fr",
                 customVocabulary: [],
                 customModes: [],
-                processingModel: "gpt-4o-mini"
+                processingModel: "gpt-4o-mini",
+                skippedUpdateVersion: "",
+                lastUpdateCheck: 0
             )
             config.save()
 
@@ -4232,11 +4405,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func setupAutoStart() {
-        let plistPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/com.whisper-voice.plist")
+    static let launchAgentPath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/LaunchAgents/com.whisper-voice.plist")
 
-        let appPath = Bundle.main.bundlePath
+    func setupAutoStart() {
+        let appPath = "/Applications/Whisper Voice.app"
 
         let plistContent = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -4257,7 +4430,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         </plist>
         """
 
-        try? plistContent.write(to: plistPath, atomically: true, encoding: .utf8)
+        try? plistContent.write(to: AppDelegate.launchAgentPath, atomically: true, encoding: .utf8)
+        LogManager.shared.log("Launch at login enabled")
+    }
+
+    func removeAutoStart() {
+        try? FileManager.default.removeItem(at: AppDelegate.launchAgentPath)
+        LogManager.shared.log("Launch at login disabled")
+    }
+
+    private var isAutoStartEnabled: Bool {
+        FileManager.default.fileExists(atPath: AppDelegate.launchAgentPath.path)
     }
 
     private func updateStatusIcon() {
@@ -4854,13 +5037,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func checkForUpdatesSilently() {
+        // Skip if checked less than 24h ago
+        if let config = Config.load() {
+            let lastCheck = config.lastUpdateCheck
+            let now = Date().timeIntervalSince1970
+            if lastCheck > 0 && (now - lastCheck) < 86400 {
+                LogManager.shared.log("[Update] Skipping check (last check < 24h ago)")
+                return
+            }
+        }
+
         UpdateChecker.checkForUpdates { [weak self] updateInfo in
+            // Save last check time
+            self?.saveUpdateCheckTime()
+
             if let info = updateInfo {
+                // Skip if user already dismissed this version
+                if let config = Config.load(), config.skippedUpdateVersion == info.version {
+                    LogManager.shared.log("[Update] Skipping v\(info.version) (dismissed by user)")
+                    return
+                }
                 LogManager.shared.log("[Update] New version available: \(info.version)")
                 self?.updateWindow = UpdateWindow(updateInfo: info)
                 self?.updateWindow?.show()
             }
         }
+    }
+
+    private func saveUpdateCheckTime() {
+        guard var config = Config.load() else { return }
+        config.lastUpdateCheck = Date().timeIntervalSince1970
+        config.save()
     }
 
     @objc private func quit() {
