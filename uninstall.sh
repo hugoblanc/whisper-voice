@@ -41,10 +41,22 @@ if [ -f "$CONFIG_PATH" ]; then
     fi
 fi
 
-# Remove logs
-LOGS_PATH="$HOME/Library/Application Support/WhisperVoice"
-if [ -d "$LOGS_PATH" ]; then
-    rm -rf "$LOGS_PATH"
+# Ask about dictation history, then remove logs/models
+APP_SUPPORT_PATH="$HOME/Library/Application Support/WhisperVoice"
+HISTORY_PATH="$APP_SUPPORT_PATH/history.json"
+if [ -f "$HISTORY_PATH" ]; then
+    read -p "Remove dictation history ($HISTORY_PATH)? (y/N): " REMOVE_HISTORY
+    if [[ "$REMOVE_HISTORY" =~ ^[Yy]$ ]]; then
+        rm -rf "$APP_SUPPORT_PATH"
+        echo -e "${GREEN}✓${NC} History & logs removed"
+    else
+        # Keep history.json; remove logs & models only
+        rm -f "$APP_SUPPORT_PATH/logs.txt"
+        rm -rf "$APP_SUPPORT_PATH/models"
+        echo "History kept at: $HISTORY_PATH"
+    fi
+elif [ -d "$APP_SUPPORT_PATH" ]; then
+    rm -rf "$APP_SUPPORT_PATH"
     echo -e "${GREEN}✓${NC} Logs removed"
 fi
 

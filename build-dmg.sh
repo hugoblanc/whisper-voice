@@ -78,11 +78,17 @@ if [ -f "$PROJECT_DIR/Resources/whisper-server" ]; then
     echo -e "  ${GREEN}+${NC} whisper-server included"
 fi
 
-# Sign the app with Developer ID certificate
+# Sign the app with Developer ID certificate + entitlements
+ENTITLEMENTS_PATH="$PROJECT_DIR/WhisperVoice.entitlements"
 DEVELOPER_ID=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
 if [ -n "$DEVELOPER_ID" ]; then
     echo -e "Signing with: ${YELLOW}$DEVELOPER_ID${NC}"
-    codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_PATH"
+    if [ -f "$ENTITLEMENTS_PATH" ]; then
+        codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS_PATH" --sign "$DEVELOPER_ID" "$APP_PATH"
+    else
+        echo -e "${RED}Warning: $ENTITLEMENTS_PATH not found — signing without entitlements (mic/AppleScript may fail)${NC}"
+        codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_PATH"
+    fi
 else
     echo -e "${YELLOW}Warning: Developer ID not found, using ad-hoc signing${NC}"
     codesign --force --deep --sign - "$APP_PATH"
