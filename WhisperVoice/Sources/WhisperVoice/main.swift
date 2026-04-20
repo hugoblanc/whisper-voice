@@ -569,6 +569,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     // Local provider elements (shown when local is selected)
     private var apiKeyLabel: NSTextField!
     private var localSettingsContainer: NSView!
+    private var remoteSettingsContainer: NSView!
     private var modelPopup: NSPopUpButton!
     private var downloadButton: NSButton!
     private var downloadProgress: NSProgressIndicator!
@@ -586,13 +587,14 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     private var launchAtLoginCheckbox: NSButton!
 
     // Shortcuts tab elements
-    private var toggleShortcutPopup: NSPopUpButton!
-    private var pttKeyPopup: NSPopUpButton!
+    private var toggleShortcutRecorder: ShortcutRecorderView!
+    private var pttKeyRecorder: ShortcutRecorderView!
 
     // Modes tab elements
     private var modesContainer: NSView!
     private var customModesData: [[String: String]] = []
     private var customModePromptViews: [NSTextView] = []
+    private var builtInModeCheckboxes: [String: NSButton] = [:]
     private var customModeNameFields: [NSTextField] = []
 
     // Logs tab elements
@@ -614,7 +616,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
     private func setupWindow() {
         // Create window
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 470),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -628,7 +630,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         contentView.wantsLayer = true
 
         // Create tab view
-        tabView = NSTabView(frame: NSRect(x: 10, y: 50, width: 480, height: 340))
+        tabView = NSTabView(frame: NSRect(x: 10, y: 50, width: 480, height: 410))
         contentView.addSubview(tabView)
 
         // Add tabs
@@ -654,15 +656,16 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         let generalTab = NSTabViewItem(identifier: "general")
         generalTab.label = "General"
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+        // Compact 380px view — fits within the tab's content area without
+        // bleeding into the tab bar at the top.
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 380))
 
-        // Provider label
+        // === Top: Provider selection (always visible) ===
         let providerLabel = NSTextField(labelWithString: "Transcription Provider:")
-        providerLabel.frame = NSRect(x: 20, y: 250, width: 200, height: 20)
+        providerLabel.frame = NSRect(x: 20, y: 340, width: 200, height: 20)
         view.addSubview(providerLabel)
 
-        // Provider popup
-        providerPopup = NSPopUpButton(frame: NSRect(x: 20, y: 220, width: 250, height: 26))
+        providerPopup = NSPopUpButton(frame: NSRect(x: 20, y: 310, width: 250, height: 26))
         for provider in TranscriptionProviderFactory.availableProviders {
             providerPopup.addItem(withTitle: provider.displayName)
             providerPopup.lastItem?.representedObject = provider
@@ -671,57 +674,61 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         providerPopup.action = #selector(providerSelectionChanged)
         view.addSubview(providerPopup)
 
-        // API Key label (will be hidden for local provider)
+        // === Middle: Remote & Local containers share the same rect ===
+        let containerRect = NSRect(x: 0, y: 80, width: 460, height: 220)
+
+        remoteSettingsContainer = NSView(frame: containerRect)
+        view.addSubview(remoteSettingsContainer)
+
+        // API Key
         apiKeyLabel = NSTextField(labelWithString: "API Key:")
-        apiKeyLabel.frame = NSRect(x: 20, y: 180, width: 200, height: 20)
-        view.addSubview(apiKeyLabel)
+        apiKeyLabel.frame = NSRect(x: 20, y: 190, width: 200, height: 20)
+        remoteSettingsContainer.addSubview(apiKeyLabel)
 
-        // API Key field
-        apiKeyField = NSSecureTextField(frame: NSRect(x: 20, y: 150, width: 420, height: 26))
+        apiKeyField = NSSecureTextField(frame: NSRect(x: 20, y: 160, width: 420, height: 26))
         apiKeyField.placeholderString = "sk-..."
-        view.addSubview(apiKeyField)
+        remoteSettingsContainer.addSubview(apiKeyField)
 
-        // API Key link
-        apiKeyLinkButton = NSButton(frame: NSRect(x: 20, y: 125, width: 300, height: 20))
+        apiKeyLinkButton = NSButton(frame: NSRect(x: 20, y: 135, width: 420, height: 20))
         apiKeyLinkButton.bezelStyle = .inline
         apiKeyLinkButton.isBordered = false
         apiKeyLinkButton.target = self
         apiKeyLinkButton.action = #selector(openApiKeyPage)
         updateApiKeyLink(for: TranscriptionProviderFactory.availableProviders.first!)
-        view.addSubview(apiKeyLinkButton)
+        remoteSettingsContainer.addSubview(apiKeyLinkButton)
 
         // Custom Vocabulary
         let vocabLabel = NSTextField(labelWithString: "Custom Vocabulary (comma-separated):")
-        vocabLabel.frame = NSRect(x: 20, y: 100, width: 300, height: 20)
-        view.addSubview(vocabLabel)
+        vocabLabel.frame = NSRect(x: 20, y: 105, width: 300, height: 20)
+        remoteSettingsContainer.addSubview(vocabLabel)
 
-        customVocabularyField = NSTextField(frame: NSRect(x: 20, y: 70, width: 420, height: 26))
+        customVocabularyField = NSTextField(frame: NSRect(x: 20, y: 75, width: 420, height: 26))
         customVocabularyField.placeholderString = "PostHog, Kubernetes, Chatwoot..."
-        view.addSubview(customVocabularyField)
+        remoteSettingsContainer.addSubview(customVocabularyField)
 
-        // LLM Model for AI processing
+        // AI Processing Model
         let llmLabel = NSTextField(labelWithString: "AI Processing Model:")
-        llmLabel.frame = NSRect(x: 20, y: 45, width: 150, height: 20)
-        view.addSubview(llmLabel)
+        llmLabel.frame = NSRect(x: 20, y: 40, width: 160, height: 20)
+        remoteSettingsContainer.addSubview(llmLabel)
 
-        processingModelPopup = NSPopUpButton(frame: NSRect(x: 170, y: 42, width: 270, height: 26))
+        processingModelPopup = NSPopUpButton(frame: NSRect(x: 180, y: 36, width: 260, height: 26))
         for model in TextProcessor.availableModels {
             processingModelPopup.addItem(withTitle: model.name)
             processingModelPopup.lastItem?.representedObject = model.id
         }
-        view.addSubview(processingModelPopup)
+        remoteSettingsContainer.addSubview(processingModelPopup)
 
         // === Local Provider Settings (hidden by default) ===
-        localSettingsContainer = NSView(frame: NSRect(x: 0, y: 40, width: 460, height: 170))
+        localSettingsContainer = NSView(frame: containerRect)
         localSettingsContainer.isHidden = true
         view.addSubview(localSettingsContainer)
 
         // Model selection
         let modelLabel = NSTextField(labelWithString: "Model:")
-        modelLabel.frame = NSRect(x: 20, y: 140, width: 80, height: 20)
+        modelLabel.frame = NSRect(x: 20, y: 190, width: 80, height: 20)
         localSettingsContainer.addSubview(modelLabel)
 
-        modelPopup = NSPopUpButton(frame: NSRect(x: 100, y: 137, width: 250, height: 26))
+        modelPopup = NSPopUpButton(frame: NSRect(x: 100, y: 187, width: 250, height: 26))
         for model in WhisperModelInfo.available {
             let status = WhisperModelManager.shared.isModelDownloaded(model.id) ? " ✓" : ""
             modelPopup.addItem(withTitle: "\(model.name) (\(model.size))\(status)")
@@ -734,11 +741,11 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         // Download button
         downloadButton = NSButton(title: "Download", target: self, action: #selector(downloadModelClicked))
         downloadButton.bezelStyle = .rounded
-        downloadButton.frame = NSRect(x: 360, y: 137, width: 90, height: 26)
+        downloadButton.frame = NSRect(x: 360, y: 187, width: 90, height: 26)
         localSettingsContainer.addSubview(downloadButton)
 
         // Progress bar
-        downloadProgress = NSProgressIndicator(frame: NSRect(x: 20, y: 110, width: 430, height: 20))
+        downloadProgress = NSProgressIndicator(frame: NSRect(x: 20, y: 160, width: 430, height: 20))
         downloadProgress.style = .bar
         downloadProgress.minValue = 0
         downloadProgress.maxValue = 1
@@ -747,37 +754,37 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
         // Download status
         downloadStatusLabel = NSTextField(labelWithString: "")
-        downloadStatusLabel.frame = NSRect(x: 20, y: 85, width: 430, height: 20)
+        downloadStatusLabel.frame = NSRect(x: 20, y: 135, width: 430, height: 20)
         downloadStatusLabel.textColor = .secondaryLabelColor
         downloadStatusLabel.font = NSFont.systemFont(ofSize: 11)
         localSettingsContainer.addSubview(downloadStatusLabel)
 
         // Language
         let langLabel = NSTextField(labelWithString: "Language:")
-        langLabel.frame = NSRect(x: 20, y: 55, width: 80, height: 20)
+        langLabel.frame = NSRect(x: 20, y: 100, width: 80, height: 20)
         localSettingsContainer.addSubview(langLabel)
 
-        whisperLanguagePopup = NSPopUpButton(frame: NSRect(x: 100, y: 52, width: 120, height: 26))
+        whisperLanguagePopup = NSPopUpButton(frame: NSRect(x: 100, y: 97, width: 120, height: 26))
         whisperLanguagePopup.addItems(withTitles: ["French", "English", "Auto-detect"])
         localSettingsContainer.addSubview(whisperLanguagePopup)
 
         // Server status
         serverStatusLabel = NSTextField(labelWithString: "")
-        serverStatusLabel.frame = NSRect(x: 230, y: 55, width: 220, height: 20)
+        serverStatusLabel.frame = NSRect(x: 230, y: 100, width: 220, height: 20)
         serverStatusLabel.textColor = .secondaryLabelColor
         serverStatusLabel.font = NSFont.systemFont(ofSize: 11)
         localSettingsContainer.addSubview(serverStatusLabel)
 
         // Info text
         let infoLabel = NSTextField(wrappingLabelWithString: "Local mode runs 100% offline. The model is loaded once and kept in memory for fast transcriptions.")
-        infoLabel.frame = NSRect(x: 20, y: 10, width: 430, height: 35)
+        infoLabel.frame = NSRect(x: 20, y: 45, width: 430, height: 35)
         infoLabel.textColor = .secondaryLabelColor
         infoLabel.font = NSFont.systemFont(ofSize: 11)
         localSettingsContainer.addSubview(infoLabel)
 
-        // Launch at login checkbox
+        // === Bottom: controls always visible below containers ===
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
-        launchAtLoginCheckbox.frame = NSRect(x: 20, y: 45, width: 200, height: 20)
+        launchAtLoginCheckbox.frame = NSRect(x: 20, y: 55, width: 200, height: 20)
         launchAtLoginCheckbox.font = NSFont.systemFont(ofSize: 12)
         view.addSubview(launchAtLoginCheckbox)
 
@@ -863,24 +870,45 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         toggleLabel.frame = NSRect(x: 20, y: 250, width: 200, height: 20)
         view.addSubview(toggleLabel)
 
-        // Toggle shortcut popup
-        toggleShortcutPopup = NSPopUpButton(frame: NSRect(x: 20, y: 220, width: 200, height: 26))
-        toggleShortcutPopup.addItems(withTitles: ["Option + Space", "Control + Space", "Cmd + Shift + Space"])
-        view.addSubview(toggleShortcutPopup)
+        // Toggle shortcut recorder — toggle needs modifiers so it can't be
+        // triggered by just typing the key.
+        toggleShortcutRecorder = ShortcutRecorderView(
+            keyCode: UInt32(kVK_Space),
+            modifiers: UInt32(optionKey),
+            allowsBareKeys: false
+        )
+        toggleShortcutRecorder.frame = NSRect(x: 20, y: 220, width: 240, height: 30)
+        view.addSubview(toggleShortcutRecorder)
+
+        let toggleHint = NSTextField(labelWithString: "Click and press the combination you want. Esc cancels.")
+        toggleHint.textColor = .secondaryLabelColor
+        toggleHint.font = NSFont.systemFont(ofSize: 11)
+        toggleHint.frame = NSRect(x: 20, y: 200, width: 420, height: 16)
+        view.addSubview(toggleHint)
 
         // PTT key label
         let pttLabel = NSTextField(labelWithString: "Push-to-Talk Key:")
-        pttLabel.frame = NSRect(x: 20, y: 170, width: 200, height: 20)
+        pttLabel.frame = NSRect(x: 20, y: 160, width: 200, height: 20)
         view.addSubview(pttLabel)
 
-        // PTT key popup
-        pttKeyPopup = NSPopUpButton(frame: NSRect(x: 20, y: 140, width: 200, height: 26))
-        pttKeyPopup.addItems(withTitles: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"])
-        view.addSubview(pttKeyPopup)
+        // PTT recorder — bare keys allowed (F3 alone is fine).
+        pttKeyRecorder = ShortcutRecorderView(
+            keyCode: UInt32(kVK_F3),
+            modifiers: 0,
+            allowsBareKeys: true
+        )
+        pttKeyRecorder.frame = NSRect(x: 20, y: 130, width: 240, height: 30)
+        view.addSubview(pttKeyRecorder)
+
+        let pttHint = NSTextField(labelWithString: "Any single key or combination works.")
+        pttHint.textColor = .secondaryLabelColor
+        pttHint.font = NSFont.systemFont(ofSize: 11)
+        pttHint.frame = NSRect(x: 20, y: 110, width: 420, height: 16)
+        view.addSubview(pttHint)
 
         // Note
-        let noteLabel = NSTextField(wrappingLabelWithString: "Note: Changes take effect immediately after saving.")
-        noteLabel.frame = NSRect(x: 20, y: 80, width: 420, height: 40)
+        let noteLabel = NSTextField(wrappingLabelWithString: "Note: Changes take effect after clicking Save & Apply.")
+        noteLabel.frame = NSRect(x: 20, y: 60, width: 420, height: 40)
         noteLabel.textColor = .secondaryLabelColor
         noteLabel.font = NSFont.systemFont(ofSize: 12)
         view.addSubview(noteLabel)
@@ -893,28 +921,57 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         let modesTab = NSTabViewItem(identifier: "modes")
         modesTab.label = "Modes"
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 380))
 
-        // Title
+        // === Built-in modes section ===
+        let builtInLabel = NSTextField(labelWithString: "Built-in Modes")
+        builtInLabel.font = NSFont.boldSystemFont(ofSize: 13)
+        builtInLabel.frame = NSRect(x: 20, y: 350, width: 300, height: 20)
+        view.addSubview(builtInLabel)
+
+        let builtInHint = NSTextField(labelWithString: "Disable modes you don't use to keep the Super-key picker short.")
+        builtInHint.textColor = .secondaryLabelColor
+        builtInHint.font = NSFont.systemFont(ofSize: 11)
+        builtInHint.frame = NSRect(x: 20, y: 330, width: 420, height: 16)
+        view.addSubview(builtInHint)
+
+        // 3 columns × 2 rows of checkboxes for the 6 built-in modes
+        let columns = 3
+        let cellW: CGFloat = 140
+        let cellH: CGFloat = 24
+        let startX: CGFloat = 20
+        let startY: CGFloat = 300
+        for (index, mode) in ModeManager.builtInModes.enumerated() {
+            let col = index % columns
+            let row = index / columns
+            let x = startX + CGFloat(col) * cellW
+            let y = startY - CGFloat(row) * (cellH + 4)
+            let cb = NSButton(checkboxWithTitle: mode.name, target: nil, action: nil)
+            cb.frame = NSRect(x: x, y: y, width: cellW - 8, height: cellH)
+            cb.state = .on
+            view.addSubview(cb)
+            builtInModeCheckboxes[mode.id] = cb
+        }
+
+        // === Custom modes section ===
         let titleLabel = NSTextField(labelWithString: "Custom Processing Modes")
         titleLabel.font = NSFont.boldSystemFont(ofSize: 13)
-        titleLabel.frame = NSRect(x: 20, y: 270, width: 300, height: 20)
+        titleLabel.frame = NSRect(x: 20, y: 240, width: 300, height: 20)
         view.addSubview(titleLabel)
 
-        // Add mode button
         let addButton = NSButton(title: "+ Add Mode", target: self, action: #selector(addCustomMode))
         addButton.bezelStyle = .rounded
-        addButton.frame = NSRect(x: 350, y: 265, width: 100, height: 26)
+        addButton.frame = NSRect(x: 350, y: 235, width: 100, height: 26)
         view.addSubview(addButton)
 
-        // Scrollable container for modes list
-        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 10, width: 420, height: 250))
+        // Scrollable container for custom modes
+        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 10, width: 420, height: 215))
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
 
-        modesContainer = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 250))
+        modesContainer = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 215))
         modesContainer.autoresizingMask = [.width]
 
         let clipView = NSClipView()
@@ -1190,25 +1247,15 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         default: whisperLanguagePopup.selectItem(at: 0) // French
         }
 
-        // Toggle shortcut
-        let modifiers = config.shortcutModifiers
-        if modifiers & UInt32(controlKey) != 0 {
-            toggleShortcutPopup.selectItem(at: 1)
-        } else if modifiers & UInt32(cmdKey) != 0 && modifiers & UInt32(shiftKey) != 0 {
-            toggleShortcutPopup.selectItem(at: 2)
-        } else {
-            toggleShortcutPopup.selectItem(at: 0)
-        }
-
-        // PTT key
-        let pttKeyCodes: [UInt32] = [
-            UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
-            UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
-            UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
-        ]
-        if let pttIndex = pttKeyCodes.firstIndex(of: config.pushToTalkKeyCode) {
-            pttKeyPopup.selectItem(at: pttIndex)
-        }
+        // Toggle shortcut + PTT — load into the recorders
+        toggleShortcutRecorder.setBinding(
+            keyCode: config.shortcutKeyCode,
+            modifiers: config.shortcutModifiers
+        )
+        pttKeyRecorder.setBinding(
+            keyCode: config.pushToTalkKeyCode,
+            modifiers: config.pushToTalkModifiers
+        )
 
         // Custom vocabulary
         customVocabularyField.stringValue = config.customVocabulary.joined(separator: ", ")
@@ -1221,6 +1268,12 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         // Custom modes
         customModesData = config.customModes
         refreshModesUI()
+
+        // Built-in modes enable/disable state
+        let disabledIds = Set(config.disabledBuiltInModeIds)
+        for (modeId, cb) in builtInModeCheckboxes {
+            cb.state = disabledIds.contains(modeId) ? .off : .on
+        }
 
         // Launch at login
         let launchAgentExists = FileManager.default.fileExists(atPath: AppDelegate.launchAgentPath.path)
@@ -1252,23 +1305,14 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
         let isLocal = provider.id == "local"
 
-        // Show/hide API key fields
-        apiKeyLabel.isHidden = isLocal
-        apiKeyField.isHidden = isLocal
-        apiKeyLinkButton.isHidden = isLocal
-
-        // Show/hide local settings
+        // Toggle the two settings containers — only one visible at a time.
+        remoteSettingsContainer.isHidden = isLocal
         localSettingsContainer.isHidden = !isLocal
 
-        // Move test button based on provider
         if isLocal {
             testConnectionButton.title = "Test Setup"
-            testConnectionButton.frame = NSRect(x: 20, y: 20, width: 130, height: 32)
-            connectionStatusLabel.frame = NSRect(x: 160, y: 25, width: 280, height: 20)
         } else {
             testConnectionButton.title = "Test Connection"
-            testConnectionButton.frame = NSRect(x: 20, y: 10, width: 130, height: 32)
-            connectionStatusLabel.frame = NSRect(x: 160, y: 15, width: 280, height: 20)
             apiKeyField.placeholderString = provider.id == "openai" ? "sk-..." : "Enter API key"
         }
     }
@@ -1459,21 +1503,11 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             }
         }
 
-        // Parse toggle shortcut
-        let modifiers: UInt32
-        switch toggleShortcutPopup.indexOfSelectedItem {
-        case 1: modifiers = UInt32(controlKey)
-        case 2: modifiers = UInt32(cmdKey | shiftKey)
-        default: modifiers = UInt32(optionKey)
-        }
-
-        // Parse PTT key
-        let pttKeyCodes: [UInt32] = [
-            UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
-            UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
-            UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12)
-        ]
-        let pttKeyCode = pttKeyCodes[pttKeyPopup.indexOfSelectedItem]
+        // Shortcut bindings — come directly from the recorders
+        let toggleKeyCode = toggleShortcutRecorder.keyCode
+        let toggleModifiers = toggleShortcutRecorder.modifiers
+        let pttKeyCode = pttKeyRecorder.keyCode
+        let pttModifiers = pttKeyRecorder.modifiers
 
         // Preserve existing providerApiKeys if they exist
         let existingProviderKeys = currentConfig?.providerApiKeys ?? [:]
@@ -1504,15 +1538,17 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             provider: provider.id,
             apiKey: apiKey,
             providerApiKeys: existingProviderKeys,
-            shortcutModifiers: modifiers,
-            shortcutKeyCode: UInt32(kVK_Space),
+            shortcutModifiers: toggleModifiers,
+            shortcutKeyCode: toggleKeyCode,
             pushToTalkKeyCode: pttKeyCode,
+            pushToTalkModifiers: pttModifiers,
             whisperCliPath: "",  // No longer used, kept for compatibility
             whisperModelPath: modelPath,
             whisperLanguage: language,
             customVocabulary: customVocabulary,
             customModes: validCustomModes,
-            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4o-mini",
+            disabledBuiltInModeIds: builtInModeCheckboxes.compactMap { $0.value.state == .off ? $0.key : nil },
+            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4.1-nano",
             skippedUpdateVersion: currentConfig?.skippedUpdateVersion ?? "",
             lastUpdateCheck: currentConfig?.lastUpdateCheck ?? 0
         )
@@ -1596,6 +1632,7 @@ struct Config {
     var shortcutModifiers: UInt32  // e.g., optionKey
     var shortcutKeyCode: UInt32    // e.g., kVK_Space
     var pushToTalkKeyCode: UInt32  // e.g., kVK_F3
+    var pushToTalkModifiers: UInt32  // 0 = bare key
 
     // Local whisper.cpp settings
     var whisperCliPath: String     // Path to whisper-cli binary
@@ -1607,6 +1644,9 @@ struct Config {
 
     // Custom processing modes
     var customModes: [[String: String]]
+
+    // Built-in mode IDs the user has hidden from the UI (empty by default).
+    var disabledBuiltInModeIds: [String]
 
     // LLM model for AI processing modes
     var processingModel: String
@@ -1635,6 +1675,7 @@ struct Config {
         let modifiers = json["shortcutModifiers"] as? UInt32 ?? UInt32(optionKey)
         let keyCode = json["shortcutKeyCode"] as? UInt32 ?? UInt32(kVK_Space)
         let pttKeyCode = json["pushToTalkKeyCode"] as? UInt32 ?? UInt32(kVK_F3)
+        let pttModifiers = json["pushToTalkModifiers"] as? UInt32 ?? 0
 
         // Local whisper.cpp settings
         let whisperCliPath = json["whisperCliPath"] as? String ?? ""
@@ -1652,8 +1693,11 @@ struct Config {
             return m
         }
 
+        // Disabled built-in modes
+        let disabledBuiltInModeIds = json["disabledBuiltInModeIds"] as? [String] ?? []
+
         // Processing model
-        let processingModel = json["processingModel"] as? String ?? "gpt-4o-mini"
+        let processingModel = json["processingModel"] as? String ?? "gpt-4.1-nano"
 
         // Update tracking
         let skippedUpdateVersion = json["skippedUpdateVersion"] as? String ?? ""
@@ -1666,11 +1710,13 @@ struct Config {
             shortcutModifiers: modifiers,
             shortcutKeyCode: keyCode,
             pushToTalkKeyCode: pttKeyCode,
+            pushToTalkModifiers: pttModifiers,
             whisperCliPath: whisperCliPath,
             whisperModelPath: whisperModelPath,
             whisperLanguage: whisperLanguage,
             customVocabulary: customVocabulary,
             customModes: customModes,
+            disabledBuiltInModeIds: disabledBuiltInModeIds,
             processingModel: processingModel,
             skippedUpdateVersion: skippedUpdateVersion,
             lastUpdateCheck: lastUpdateCheck
@@ -1683,7 +1729,8 @@ struct Config {
             "apiKey": apiKey,
             "shortcutModifiers": shortcutModifiers,
             "shortcutKeyCode": shortcutKeyCode,
-            "pushToTalkKeyCode": pushToTalkKeyCode
+            "pushToTalkKeyCode": pushToTalkKeyCode,
+            "pushToTalkModifiers": pushToTalkModifiers
         ]
         if !providerApiKeys.isEmpty {
             json["providerApiKeys"] = providerApiKeys
@@ -1704,7 +1751,10 @@ struct Config {
         if !customModes.isEmpty {
             json["customModes"] = customModes
         }
-        if processingModel != "gpt-4o-mini" {
+        if !disabledBuiltInModeIds.isEmpty {
+            json["disabledBuiltInModeIds"] = disabledBuiltInModeIds
+        }
+        if processingModel != "gpt-4.1-nano" {
             json["processingModel"] = processingModel
         }
         if !skippedUpdateVersion.isEmpty {
@@ -1749,6 +1799,19 @@ struct Config {
 func keyCodeToString(_ keyCode: UInt32) -> String {
     switch Int(keyCode) {
     case kVK_Space: return "Space"
+    case kVK_Return: return "Return"
+    case kVK_Tab: return "Tab"
+    case kVK_Delete: return "Delete"
+    case kVK_ForwardDelete: return "Fwd Delete"
+    case kVK_Escape: return "Esc"
+    case kVK_LeftArrow: return "←"
+    case kVK_RightArrow: return "→"
+    case kVK_UpArrow: return "↑"
+    case kVK_DownArrow: return "↓"
+    case kVK_Home: return "Home"
+    case kVK_End: return "End"
+    case kVK_PageUp: return "PgUp"
+    case kVK_PageDown: return "PgDn"
     case kVK_F1: return "F1"
     case kVK_F2: return "F2"
     case kVK_F3: return "F3"
@@ -1761,7 +1824,167 @@ func keyCodeToString(_ keyCode: UInt32) -> String {
     case kVK_F10: return "F10"
     case kVK_F11: return "F11"
     case kVK_F12: return "F12"
+    case kVK_F13: return "F13"
+    case kVK_F14: return "F14"
+    case kVK_F15: return "F15"
+    case kVK_F16: return "F16"
+    case kVK_F17: return "F17"
+    case kVK_F18: return "F18"
+    case kVK_F19: return "F19"
+    case kVK_ANSI_A: return "A"
+    case kVK_ANSI_B: return "B"
+    case kVK_ANSI_C: return "C"
+    case kVK_ANSI_D: return "D"
+    case kVK_ANSI_E: return "E"
+    case kVK_ANSI_F: return "F"
+    case kVK_ANSI_G: return "G"
+    case kVK_ANSI_H: return "H"
+    case kVK_ANSI_I: return "I"
+    case kVK_ANSI_J: return "J"
+    case kVK_ANSI_K: return "K"
+    case kVK_ANSI_L: return "L"
+    case kVK_ANSI_M: return "M"
+    case kVK_ANSI_N: return "N"
+    case kVK_ANSI_O: return "O"
+    case kVK_ANSI_P: return "P"
+    case kVK_ANSI_Q: return "Q"
+    case kVK_ANSI_R: return "R"
+    case kVK_ANSI_S: return "S"
+    case kVK_ANSI_T: return "T"
+    case kVK_ANSI_U: return "U"
+    case kVK_ANSI_V: return "V"
+    case kVK_ANSI_W: return "W"
+    case kVK_ANSI_X: return "X"
+    case kVK_ANSI_Y: return "Y"
+    case kVK_ANSI_Z: return "Z"
+    case kVK_ANSI_0: return "0"
+    case kVK_ANSI_1: return "1"
+    case kVK_ANSI_2: return "2"
+    case kVK_ANSI_3: return "3"
+    case kVK_ANSI_4: return "4"
+    case kVK_ANSI_5: return "5"
+    case kVK_ANSI_6: return "6"
+    case kVK_ANSI_7: return "7"
+    case kVK_ANSI_8: return "8"
+    case kVK_ANSI_9: return "9"
+    case kVK_ANSI_Minus: return "-"
+    case kVK_ANSI_Equal: return "="
+    case kVK_ANSI_LeftBracket: return "["
+    case kVK_ANSI_RightBracket: return "]"
+    case kVK_ANSI_Semicolon: return ";"
+    case kVK_ANSI_Quote: return "'"
+    case kVK_ANSI_Comma: return ","
+    case kVK_ANSI_Period: return "."
+    case kVK_ANSI_Slash: return "/"
+    case kVK_ANSI_Backslash: return "\\"
+    case kVK_ANSI_Grave: return "`"
     default: return "Key(\(keyCode))"
+    }
+}
+
+func modifiersToString(_ modifiers: UInt32) -> String {
+    var parts: [String] = []
+    if modifiers & UInt32(NSEvent.ModifierFlags.control.rawValue) != 0 { parts.append("⌃") }
+    if modifiers & UInt32(NSEvent.ModifierFlags.option.rawValue) != 0  { parts.append("⌥") }
+    if modifiers & UInt32(NSEvent.ModifierFlags.shift.rawValue) != 0   { parts.append("⇧") }
+    if modifiers & UInt32(NSEvent.ModifierFlags.command.rawValue) != 0 { parts.append("⌘") }
+    return parts.joined()
+}
+
+/// Clickable control that captures a key combo when focused. Replaces the
+/// fixed-list dropdowns in the Shortcuts tab — user can bind any combo.
+class ShortcutRecorderView: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private var isRecording = false
+    private var monitor: Any?
+
+    var keyCode: UInt32
+    var modifiers: UInt32
+    var allowsBareKeys: Bool
+
+    init(keyCode: UInt32, modifiers: UInt32, allowsBareKeys: Bool = true) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        self.allowsBareKeys = allowsBareKeys
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        layer?.borderWidth = 1
+        layer?.cornerRadius = 5
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.cgColor
+
+        label.alignment = .center
+        label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        updateDisplay()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if isRecording { stopRecording() } else { startRecording() }
+    }
+
+    private func startRecording() {
+        isRecording = true
+        label.stringValue = "Press keys…"
+        label.textColor = .secondaryLabelColor
+        layer?.borderColor = NSColor.systemBlue.cgColor
+        window?.makeFirstResponder(self)
+
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.isRecording else { return event }
+            if Int(event.keyCode) == kVK_Escape {
+                self.stopRecording()
+                return nil
+            }
+            let mods = UInt32(event.modifierFlags.rawValue) & (
+                UInt32(NSEvent.ModifierFlags.command.rawValue) |
+                UInt32(NSEvent.ModifierFlags.option.rawValue) |
+                UInt32(NSEvent.ModifierFlags.control.rawValue) |
+                UInt32(NSEvent.ModifierFlags.shift.rawValue)
+            )
+            if !self.allowsBareKeys && mods == 0 {
+                // Require a modifier: flash red briefly, keep recording.
+                self.layer?.borderColor = NSColor.systemRed.cgColor
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    self?.layer?.borderColor = NSColor.systemBlue.cgColor
+                }
+                return nil
+            }
+            self.keyCode = UInt32(event.keyCode)
+            self.modifiers = mods
+            self.stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        isRecording = false
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        label.textColor = .labelColor
+        updateDisplay()
+    }
+
+    private func updateDisplay() {
+        let combo = modifiersToString(modifiers) + (modifiers != 0 ? " " : "") + keyCodeToString(keyCode)
+        label.stringValue = combo
+    }
+
+    func setBinding(keyCode: UInt32, modifiers: UInt32) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        updateDisplay()
     }
 }
 
@@ -1894,10 +2117,12 @@ class ModeManager {
 
     /// Reload modes from config (built-in + custom modes)
     func reloadModes() {
-        var allModes = ModeManager.builtInModes
+        let config = Config.load()
+        let disabledBuiltIns = Set(config?.disabledBuiltInModeIds ?? [])
+        var allModes = ModeManager.builtInModes.filter { !disabledBuiltIns.contains($0.id) }
 
         // Load custom modes from config
-        if let config = Config.load() {
+        if let config = config {
             for modeDict in config.customModes {
                 guard let id = modeDict["id"], !id.isEmpty,
                       let name = modeDict["name"], !name.isEmpty,
@@ -1972,16 +2197,18 @@ class TextProcessor {
 
     private let endpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
 
-    /// Available LLM models for processing
+    /// Available LLM models for processing. Ordered cheapest/fastest → premium,
+    /// with legacy GPT-4o kept at the bottom for users who already rely on it.
     static let availableModels: [(id: String, name: String)] = [
-        ("gpt-4o-mini", "GPT-4o Mini (rapide, économique)"),
-        ("gpt-4o", "GPT-4o (meilleur, plus cher)"),
-        ("gpt-4.1-mini", "GPT-4.1 Mini"),
-        ("gpt-4.1", "GPT-4.1 (premium)")
+        ("gpt-4.1-nano", "GPT-4.1 Nano (le plus rapide et économique)"),
+        ("gpt-4.1-mini", "GPT-4.1 Mini (équilibre qualité/coût)"),
+        ("gpt-4.1", "GPT-4.1 (premium)"),
+        ("gpt-4o-mini", "GPT-4o Mini (ancien)"),
+        ("gpt-4o", "GPT-4o (ancien)")
     ]
 
     private var model: String {
-        Config.load()?.processingModel ?? "gpt-4o-mini"
+        Config.load()?.processingModel ?? "gpt-4.1-nano"
     }
 
     func process(text: String, mode: ProcessingMode, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
@@ -4778,12 +5005,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 shortcutModifiers: modifiers,
                 shortcutKeyCode: UInt32(kVK_Space),
                 pushToTalkKeyCode: pttKeyCode,
+                pushToTalkModifiers: 0,
                 whisperCliPath: "",
                 whisperModelPath: "",
                 whisperLanguage: "fr",
                 customVocabulary: [],
                 customModes: [],
-                processingModel: "gpt-4o-mini",
+                disabledBuiltInModeIds: [],
+                processingModel: "gpt-4.1-nano",
                 skippedUpdateVersion: "",
                 lastUpdateCheck: 0
             )
@@ -4962,10 +5191,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupPushToTalkHotkey() {
         guard let config = config else { return }
         let pttKeyCode = UInt16(config.pushToTalkKeyCode)
+        let pttMods = config.pushToTalkModifiers
+        // On keyDown we also require the configured modifiers (if any) so a
+        // bare letter doesn't fire PTT unintentionally. On keyUp we match on
+        // the key only — user may release the modifier before the key.
+        let matchesDown: (NSEvent) -> Bool = { event in
+            guard event.keyCode == pttKeyCode else { return false }
+            if pttMods == 0 { return true }
+            let relevant: UInt32 =
+                UInt32(NSEvent.ModifierFlags.command.rawValue) |
+                UInt32(NSEvent.ModifierFlags.option.rawValue) |
+                UInt32(NSEvent.ModifierFlags.control.rawValue) |
+                UInt32(NSEvent.ModifierFlags.shift.rawValue)
+            return (UInt32(event.modifierFlags.rawValue) & relevant) & pttMods == pttMods
+        }
 
         // Global monitor for key down (start recording)
         pttGlobalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == pttKeyCode && !event.isARepeat {
+            if matchesDown(event) && !event.isARepeat {
                 DispatchQueue.main.async {
                     self?.startPushToTalk()
                 }
@@ -4985,7 +5228,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pttLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             if event.keyCode == pttKeyCode {
                 DispatchQueue.main.async {
-                    if event.type == .keyDown && !event.isARepeat {
+                    if event.type == .keyDown && !event.isARepeat && matchesDown(event) {
                         self?.startPushToTalk()
                     } else if event.type == .keyUp {
                         self?.stopPushToTalk()
