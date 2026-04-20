@@ -1672,10 +1672,16 @@ struct Config {
 
         // Backward compatible loading
         let providerApiKeys = json["providerApiKeys"] as? [String: String] ?? [:]
-        let modifiers = json["shortcutModifiers"] as? UInt32 ?? UInt32(optionKey)
+        // Modifiers migration: a previous build briefly saved NSEvent.ModifierFlags
+        // rawValues (>= 65536) instead of Carbon values (<= 4096). Convert back.
+        func normalizeModifiers(_ raw: UInt32) -> UInt32 {
+            guard raw >= 65536 else { return raw }
+            return carbonModifiers(from: UInt(raw))
+        }
+        let modifiers = normalizeModifiers(json["shortcutModifiers"] as? UInt32 ?? UInt32(optionKey))
         let keyCode = json["shortcutKeyCode"] as? UInt32 ?? UInt32(kVK_Space)
         let pttKeyCode = json["pushToTalkKeyCode"] as? UInt32 ?? UInt32(kVK_F3)
-        let pttModifiers = json["pushToTalkModifiers"] as? UInt32 ?? 0
+        let pttModifiers = normalizeModifiers(json["pushToTalkModifiers"] as? UInt32 ?? 0)
 
         // Local whisper.cpp settings
         let whisperCliPath = json["whisperCliPath"] as? String ?? ""
@@ -1882,13 +1888,25 @@ func keyCodeToString(_ keyCode: UInt32) -> String {
     }
 }
 
+/// Format a Carbon-encoded modifier mask (optionKey, cmdKey, etc.) for display.
 func modifiersToString(_ modifiers: UInt32) -> String {
     var parts: [String] = []
-    if modifiers & UInt32(NSEvent.ModifierFlags.control.rawValue) != 0 { parts.append("⌃") }
-    if modifiers & UInt32(NSEvent.ModifierFlags.option.rawValue) != 0  { parts.append("⌥") }
-    if modifiers & UInt32(NSEvent.ModifierFlags.shift.rawValue) != 0   { parts.append("⇧") }
-    if modifiers & UInt32(NSEvent.ModifierFlags.command.rawValue) != 0 { parts.append("⌘") }
+    if modifiers & UInt32(controlKey) != 0 { parts.append("⌃") }
+    if modifiers & UInt32(optionKey) != 0  { parts.append("⌥") }
+    if modifiers & UInt32(shiftKey) != 0   { parts.append("⇧") }
+    if modifiers & UInt32(cmdKey) != 0     { parts.append("⌘") }
     return parts.joined()
+}
+
+/// Convert NSEvent.ModifierFlags rawValue to the Carbon mask the rest of the
+/// codebase (Config, runtime matchers) expects. Only keeps the four main bits.
+func carbonModifiers(from nsFlags: UInt) -> UInt32 {
+    var m: UInt32 = 0
+    if nsFlags & NSEvent.ModifierFlags.command.rawValue != 0 { m |= UInt32(cmdKey) }
+    if nsFlags & NSEvent.ModifierFlags.option.rawValue != 0  { m |= UInt32(optionKey) }
+    if nsFlags & NSEvent.ModifierFlags.control.rawValue != 0 { m |= UInt32(controlKey) }
+    if nsFlags & NSEvent.ModifierFlags.shift.rawValue != 0   { m |= UInt32(shiftKey) }
+    return m
 }
 
 /// Clickable control that captures a key combo when focused. Replaces the
@@ -1947,12 +1965,7 @@ class ShortcutRecorderView: NSView {
                 self.stopRecording()
                 return nil
             }
-            let mods = UInt32(event.modifierFlags.rawValue) & (
-                UInt32(NSEvent.ModifierFlags.command.rawValue) |
-                UInt32(NSEvent.ModifierFlags.option.rawValue) |
-                UInt32(NSEvent.ModifierFlags.control.rawValue) |
-                UInt32(NSEvent.ModifierFlags.shift.rawValue)
-            )
+            let mods = carbonModifiers(from: event.modifierFlags.rawValue)
             if !self.allowsBareKeys && mods == 0 {
                 // Require a modifier: flash red briefly, keep recording.
                 self.layer?.borderColor = NSColor.systemRed.cgColor
@@ -5198,12 +5211,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let matchesDown: (NSEvent) -> Bool = { event in
             guard event.keyCode == pttKeyCode else { return false }
             if pttMods == 0 { return true }
-            let relevant: UInt32 =
-                UInt32(NSEvent.ModifierFlags.command.rawValue) |
-                UInt32(NSEvent.ModifierFlags.option.rawValue) |
-                UInt32(NSEvent.ModifierFlags.control.rawValue) |
-                UInt32(NSEvent.ModifierFlags.shift.rawValue)
-            return (UInt32(event.modifierFlags.rawValue) & relevant) & pttMods == pttMods
+            let eventMods = carbonModifiers(from: event.modifierFlags.rawValue)
+            return (eventMods & pttMods) == pttMods
         }
 
         // Global monitor for key down (start recording)
