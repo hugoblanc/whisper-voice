@@ -4415,7 +4415,7 @@ struct UpdateInfo {
 }
 
 class UpdateChecker {
-    static let currentVersion = "3.3.0"
+    static let currentVersion = "3.4.0"
     private static let repoOwner = "hugoblanc"
     private static let repoName = "whisper-voice"
 

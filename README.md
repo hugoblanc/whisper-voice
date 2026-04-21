@@ -14,7 +14,7 @@ Native Swift app supporting **OpenAI Whisper**, **Mistral Voxtral**, and **Local
 
 ### Easy Install (Recommended)
 
-1. **[Download for Apple Silicon (M1/M2/M3)](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.2.0-AppleSilicon.dmg)** | **[Download for Intel](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.2.0-Intel.dmg)**
+1. **[Download for Apple Silicon (M1/M2/M3)](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.4.0-AppleSilicon.dmg)** | **[Download for Intel](https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.4.0-Intel.dmg)**
 2. Open the DMG file
 3. Drag **Whisper Voice** to your Applications folder
 4. Launch the app - a setup wizard will guide you

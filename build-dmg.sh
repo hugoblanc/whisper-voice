@@ -12,7 +12,7 @@ BOLD='\033[1m'
 
 # Config
 APP_NAME="Whisper Voice"
-VERSION="3.2.0"
+VERSION="3.4.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/WhisperVoice"
 BUILD_DIR="$SCRIPT_DIR/build"
@@ -42,16 +42,20 @@ mkdir -p "$BUILD_DIR"
 echo -e "${GREEN}OK${NC}"
 echo ""
 
-# Build the app
-echo -e "${YELLOW}[3/5]${NC} Building application..."
+# Build the app for both architectures, lipo together so a single .app works
+# on Apple Silicon and Intel.
+echo -e "${YELLOW}[3/5]${NC} Building application (arm64 + x86_64)..."
 cd "$PROJECT_DIR"
-swift build -c release
+swift build -c release --arch arm64 || { echo -e "${RED}arm64 build failed${NC}"; exit 1; }
+swift build -c release --arch x86_64 || { echo -e "${RED}x86_64 build failed${NC}"; exit 1; }
 
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Build failed!${NC}"
-    exit 1
-fi
-echo -e "${GREEN}OK${NC}"
+UNIVERSAL_BIN="$PROJECT_DIR/.build/universal/WhisperVoice"
+mkdir -p "$(dirname "$UNIVERSAL_BIN")"
+lipo -create \
+    "$PROJECT_DIR/.build/arm64-apple-macosx/release/WhisperVoice" \
+    "$PROJECT_DIR/.build/x86_64-apple-macosx/release/WhisperVoice" \
+    -output "$UNIVERSAL_BIN" || { echo -e "${RED}lipo failed${NC}"; exit 1; }
+echo -e "${GREEN}OK${NC} (universal binary: $(lipo -archs "$UNIVERSAL_BIN"))"
 echo ""
 
 # Create app bundle
@@ -60,8 +64,8 @@ APP_PATH="$BUILD_DIR/$APP_NAME.app"
 mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
 
-# Copy executable
-cp ".build/release/WhisperVoice" "$APP_PATH/Contents/MacOS/WhisperVoice"
+# Copy executable (universal binary)
+cp "$UNIVERSAL_BIN" "$APP_PATH/Contents/MacOS/WhisperVoice"
 
 # Copy Info.plist
 cp "Info.plist" "$APP_PATH/Contents/"
@@ -111,11 +115,16 @@ cp -R "$APP_PATH" "$DMG_TEMP/"
 # Create symbolic link to Applications
 ln -s /Applications "$DMG_TEMP/Applications"
 
-# Create DMG
+# Create DMG (single file, then duplicate with arch-suffixed names so
+# GitHub release URLs WhisperVoice-${VERSION}-AppleSilicon.dmg and
+# -Intel.dmg both resolve — both are the same universal artifact).
 hdiutil create -volname "$APP_NAME" \
     -srcfolder "$DMG_TEMP" \
     -ov -format UDZO \
     "$BUILD_DIR/$DMG_NAME"
+
+cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-AppleSilicon.dmg"
+cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-Intel.dmg"
 
 # Cleanup
 rm -rf "$DMG_TEMP"
