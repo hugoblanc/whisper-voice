@@ -1204,17 +1204,22 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
 
         let renameBtn = NSButton(title: "Rename", target: self, action: #selector(renameSelectedProject))
         renameBtn.bezelStyle = .rounded
-        renameBtn.frame = NSRect(x: 20, y: 12, width: 90, height: 28)
+        renameBtn.frame = NSRect(x: 20, y: 12, width: 80, height: 28)
         view.addSubview(renameBtn)
 
         let archiveBtn = NSButton(title: "Archive / Restore", target: self, action: #selector(toggleArchiveSelectedProject))
         archiveBtn.bezelStyle = .rounded
-        archiveBtn.frame = NSRect(x: 118, y: 12, width: 150, height: 28)
+        archiveBtn.frame = NSRect(x: 108, y: 12, width: 130, height: 28)
         view.addSubview(archiveBtn)
+
+        let untagAllBtn = NSButton(title: "Untag all entries", target: self, action: #selector(untagAllForSelectedProject))
+        untagAllBtn.bezelStyle = .rounded
+        untagAllBtn.frame = NSRect(x: 244, y: 12, width: 130, height: 28)
+        view.addSubview(untagAllBtn)
 
         let deleteBtn = NSButton(title: "Delete", target: self, action: #selector(deleteSelectedProject))
         deleteBtn.bezelStyle = .rounded
-        deleteBtn.frame = NSRect(x: 276, y: 12, width: 80, height: 28)
+        deleteBtn.frame = NSRect(x: 380, y: 12, width: 60, height: 28)
         view.addSubview(deleteBtn)
 
         tab.view = view
@@ -1264,6 +1269,28 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         guard row >= 0 && row < all.count else { return }
         let project = all[row]
         ProjectStore.shared.setArchived(project.id, !project.archived)
+        projectsTableView?.reloadData()
+    }
+
+    @objc private func untagAllForSelectedProject() {
+        let all = ProjectStore.shared.all
+        let row = projectsTableView.selectedRow
+        guard row >= 0 && row < all.count else { return }
+        let project = all[row]
+
+        let tagged = HistoryManager.shared.getEntries().filter { $0.projectID == project.id }
+        if tagged.isEmpty { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Untag \(tagged.count) entr\(tagged.count == 1 ? "y" : "ies") from “\(project.name)”?"
+        alert.informativeText = "The project itself stays. You can retag the entries individually later."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Untag all")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let updates = tagged.map { $0.tagged(with: nil, source: "manual") }
+        HistoryManager.shared.updateEntries(updates)
         projectsTableView?.reloadData()
     }
 
@@ -3332,12 +3359,31 @@ enum ProjectPredictor {
             }
         }
 
-        // Tier 3 — bundleID (only if strong agreement to avoid "Slack → always perso" locks)
+        // Tier 3 — workspace hint (bundleID + derived-from-windowTitle workspace slug)
+        // Covers IDEs / terminals where the same app hosts multiple projects.
+        if let bundleID = ctx.app?.bundleID,
+           let hint = workspaceHint(bundleID: bundleID, windowTitle: ctx.signals?.windowTitle) {
+            let matches = entries.filter {
+                guard $0.app?.bundleID == bundleID,
+                      let other = workspaceHint(bundleID: bundleID, windowTitle: $0.signals?.windowTitle) else { return false }
+                return other == hint && activeIDs.contains($0.projectID ?? UUID())
+            }
+            if matches.count >= 2, let best = mostCommonProject(in: matches), best.ratio >= 0.6 {
+                return ProjectPrediction(project: best.project, confidence: 0.75,
+                                         reason: "\(ctx.app?.name ?? bundleID) · \(hint)",
+                                         source: "predicted")
+            }
+        }
+
+        // Tier 4 — bundleID alone, only when user has overwhelmingly tagged
+        // this app with one project (>= 5 matches, >= 80% agreement). Higher
+        // bars than V1 because bundleID-only is the tier most likely to leak
+        // tags across similar apps (e.g. every VSCode dictation as superproper).
         if let bundleID = ctx.app?.bundleID {
             let matches = entries.filter { $0.app?.bundleID == bundleID && activeIDs.contains($0.projectID ?? UUID()) }
-            if matches.count >= 3 {
-                if let best = mostCommonProject(in: matches), best.ratio >= 0.6 {
-                    return ProjectPrediction(project: best.project, confidence: 0.55,
+            if matches.count >= 5 {
+                if let best = mostCommonProject(in: matches), best.ratio >= 0.8 {
+                    return ProjectPrediction(project: best.project, confidence: 0.50,
                                              reason: "app: \(ctx.app?.name ?? bundleID)", source: "predicted")
                 }
             }
@@ -3348,27 +3394,102 @@ enum ProjectPredictor {
 
     /// When the user tags a previously-untagged entry in History, offer to tag the
     /// other untagged entries that share a strong signal. Returns matches grouped
-    /// by signal so the UI can describe what's being propagated.
-    static func findPropagationCandidates(for seed: TranscriptionEntry) -> (gitRemote: [TranscriptionEntry], browserHost: [TranscriptionEntry], bundleID: [TranscriptionEntry]) {
+    /// by signal so the UI can describe (and pick) what's being propagated.
+    struct PropagationCandidates {
+        var gitRemote: [TranscriptionEntry] = []
+        var browserHost: [TranscriptionEntry] = []
+        /// bundleID + workspace slug (IDE/Terminal): tighter than bundleID alone.
+        var workspace: [TranscriptionEntry] = []
+        var workspaceKey: String? = nil
+        /// bundleID alone: the loosest signal, offered last.
+        var bundleID: [TranscriptionEntry] = []
+    }
+
+    static func findPropagationCandidates(for seed: TranscriptionEntry) -> PropagationCandidates {
         let pool = HistoryManager.shared.getEntries().filter { $0.projectID == nil && $0.id != seed.id }
-        var git: [TranscriptionEntry] = []
-        var host: [TranscriptionEntry] = []
-        var bundle: [TranscriptionEntry] = []
+        var out = PropagationCandidates()
 
         if let remote = seed.signals?.gitRemote, !remote.isEmpty {
             let key = normalize(remote)
-            git = pool.filter { normalize($0.signals?.gitRemote ?? "") == key }
+            out.gitRemote = pool.filter { normalize($0.signals?.gitRemote ?? "") == key }
         }
         if let url = seed.signals?.browserURL, let h = urlHost(url) {
-            host = pool.filter {
+            out.browserHost = pool.filter {
                 guard let otherURL = $0.signals?.browserURL, let otherHost = urlHost(otherURL) else { return false }
                 return otherHost == h
             }
         }
-        if let bID = seed.app?.bundleID {
-            bundle = pool.filter { $0.app?.bundleID == bID }
+        if let bID = seed.app?.bundleID,
+           let hint = workspaceHint(bundleID: bID, windowTitle: seed.signals?.windowTitle) {
+            out.workspaceKey = hint
+            out.workspace = pool.filter {
+                $0.app?.bundleID == bID &&
+                    workspaceHint(bundleID: bID, windowTitle: $0.signals?.windowTitle) == hint
+            }
         }
-        return (git, host, bundle)
+        if let bID = seed.app?.bundleID {
+            out.bundleID = pool.filter { $0.app?.bundleID == bID }
+        }
+        return out
+    }
+
+    /// Extract a stable workspace slug from a windowTitle for apps where the
+    /// bundleID alone is too broad (same app hosts many projects). Returns
+    /// nil when we can't extract anything reliable.
+    static func workspaceHint(bundleID: String?, windowTitle: String?) -> String? {
+        guard let title = windowTitle?.trimmingCharacters(in: .whitespaces), !title.isEmpty else { return nil }
+        guard let bundleID = bundleID else { return nil }
+
+        // Known IDE / editor bundles — title format is usually "file — folder".
+        let ideBundles: Set<String> = [
+            "com.microsoft.VSCode",
+            "com.todesktop.230313mzl4w4u92",          // Cursor
+            "com.apple.dt.Xcode",
+            "com.sublimetext.4",
+            "com.jetbrains.intellij",
+            "com.jetbrains.pycharm",
+            "com.jetbrains.webstorm",
+            "com.jetbrains.goland",
+            "co.codeedit.CodeEdit",
+            "dev.zed.Zed",
+        ]
+
+        if ideBundles.contains(bundleID) {
+            // Try em-dash first, then en-dash, then hyphen-with-spaces.
+            for sep in [" — ", " – ", " - "] {
+                if title.contains(sep) {
+                    if let last = title.components(separatedBy: sep).last {
+                        let slug = last.trimmingCharacters(in: .whitespaces).lowercased()
+                        if !slug.isEmpty && slug.count < 80 { return slug }
+                    }
+                }
+            }
+            // No separator — title IS the slug (e.g. just a folder name)
+            return title.lowercased()
+        }
+
+        // Known terminal bundles — the first segment before the em-dash is
+        // usually the cwd folder (Terminal.app / iTerm2 / Ghostty / Warp…).
+        let terminalBundles: Set<String> = [
+            "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty",
+            "dev.warp.Warp-Stable", "dev.warp.Warp", "io.alacritty",
+            "com.github.wez.wezterm", "net.kovidgoyal.kitty", "co.zeit.hyper",
+        ]
+        if terminalBundles.contains(bundleID) {
+            for sep in [" — ", " – ", " - "] {
+                if title.contains(sep) {
+                    if let first = title.components(separatedBy: sep).first {
+                        let slug = first.trimmingCharacters(in: .whitespaces).lowercased()
+                        if !slug.isEmpty && slug.count < 80 { return slug }
+                    }
+                }
+            }
+            return title.lowercased()
+        }
+
+        // Unknown app — don't attempt extraction. Caller falls through to
+        // bundleID-only matching (which has a higher confidence threshold).
+        return nil
     }
 
     // MARK: helpers
@@ -3779,24 +3900,40 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         }
     }
 
-    private func promptPropagation(project: Project, candidates: (gitRemote: [TranscriptionEntry], browserHost: [TranscriptionEntry], bundleID: [TranscriptionEntry])) {
-        // Pick the tightest signal that has matches.
+    private func promptPropagation(project: Project, candidates: ProjectPredictor.PropagationCandidates) {
+        // Pick the tightest signal that has matches. gitRemote is authoritative
+        // (one repo = one project); then browserHost; then "same app + same
+        // workspace hint" (derived from windowTitle); bundleID alone is the
+        // loosest and often crosses projects (all VSCode windows share one
+        // bundleID), so it's last.
         let matches: [TranscriptionEntry]
         let desc: String
         if !candidates.gitRemote.isEmpty {
-            matches = candidates.gitRemote; desc = "same gitRemote"
+            matches = candidates.gitRemote; desc = "same git remote"
         } else if !candidates.browserHost.isEmpty {
             matches = candidates.browserHost; desc = "same website"
+        } else if !candidates.workspace.isEmpty, let key = candidates.workspaceKey {
+            matches = candidates.workspace; desc = "same workspace “\(key)”"
         } else if !candidates.bundleID.isEmpty {
-            matches = candidates.bundleID; desc = "same app"
+            matches = candidates.bundleID
+            desc = "same app — may cross projects, review the preview"
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.reloadData() }
             return
         }
 
+        // Preview of the first few titles so the user can spot misses before
+        // committing. Using up to 3 bullets.
+        let previewLines: [String] = matches.prefix(3).map { e in
+            let ctxHint = e.signals?.windowTitle ?? e.app?.name ?? "?"
+            let textSnippet = e.text.prefix(40).trimmingCharacters(in: .whitespacesAndNewlines)
+            return "• \(ctxHint) — \(textSnippet)…"
+        }
+        let moreSuffix = matches.count > 3 ? "\n…and \(matches.count - 3) more" : ""
+
         let alert = NSAlert()
-        alert.messageText = "Tag \(matches.count) other untagged entr\(matches.count == 1 ? "y" : "ies") with \(project.name)?"
-        alert.informativeText = "They share the \(desc). You can always change them later."
+        alert.messageText = "Tag \(matches.count) other untagged entr\(matches.count == 1 ? "y" : "ies") with “\(project.name)”?"
+        alert.informativeText = "They share the \(desc).\n\n\(previewLines.joined(separator: "\n"))\(moreSuffix)"
         alert.addButton(withTitle: "Tag all")
         alert.addButton(withTitle: "Only this one")
         alert.alertStyle = .informational
