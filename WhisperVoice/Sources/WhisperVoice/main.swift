@@ -555,7 +555,7 @@ class PermissionWizard: NSObject, NSWindowDelegate {
 
 // MARK: - Preferences Window
 
-class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
+class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private var window: NSWindow!
     private var tabView: NSTabView!
 
@@ -637,6 +637,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         setupGeneralTab()
         setupShortcutsTab()
         setupModesTab()
+        setupProjectsTab()
         setupLogsTab()
 
         // Bottom buttons
@@ -1152,6 +1153,171 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
         refreshModesUI()
     }
 
+    // MARK: - Projects tab
+
+    private var projectsTableView: NSTableView!
+
+    private func setupProjectsTab() {
+        let tab = NSTabViewItem(identifier: "projects")
+        tab.label = "Projects"
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 380))
+
+        let titleLabel = NSTextField(labelWithString: "Projects")
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 13)
+        titleLabel.frame = NSRect(x: 20, y: 350, width: 300, height: 20)
+        view.addSubview(titleLabel)
+
+        let hint = NSTextField(labelWithString: "Created projects can be assigned during recording or retroactively from the History viewer.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = NSFont.systemFont(ofSize: 11)
+        hint.frame = NSRect(x: 20, y: 330, width: 420, height: 16)
+        view.addSubview(hint)
+
+        let addButton = NSButton(title: "+ New project", target: self, action: #selector(newProjectClicked))
+        addButton.bezelStyle = .rounded
+        addButton.frame = NSRect(x: 320, y: 345, width: 120, height: 26)
+        view.addSubview(addButton)
+
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 50, width: 420, height: 270))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        projectsTableView = NSTableView()
+        projectsTableView.rowHeight = 28
+        projectsTableView.headerView = NSTableHeaderView()
+        projectsTableView.dataSource = self
+        projectsTableView.delegate = self
+        let nameCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("p-name"))
+        nameCol.title = "Name"
+        nameCol.width = 210
+        projectsTableView.addTableColumn(nameCol)
+        let countCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("p-count"))
+        countCol.title = "Entries"
+        countCol.width = 70
+        projectsTableView.addTableColumn(countCol)
+        let statusCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("p-status"))
+        statusCol.title = "Status"
+        statusCol.width = 120
+        projectsTableView.addTableColumn(statusCol)
+        scroll.documentView = projectsTableView
+        view.addSubview(scroll)
+
+        let renameBtn = NSButton(title: "Rename", target: self, action: #selector(renameSelectedProject))
+        renameBtn.bezelStyle = .rounded
+        renameBtn.frame = NSRect(x: 20, y: 12, width: 90, height: 28)
+        view.addSubview(renameBtn)
+
+        let archiveBtn = NSButton(title: "Archive / Restore", target: self, action: #selector(toggleArchiveSelectedProject))
+        archiveBtn.bezelStyle = .rounded
+        archiveBtn.frame = NSRect(x: 118, y: 12, width: 150, height: 28)
+        view.addSubview(archiveBtn)
+
+        let deleteBtn = NSButton(title: "Delete", target: self, action: #selector(deleteSelectedProject))
+        deleteBtn.bezelStyle = .rounded
+        deleteBtn.frame = NSRect(x: 276, y: 12, width: 80, height: 28)
+        view.addSubview(deleteBtn)
+
+        tab.view = view
+        tabView.addTabViewItem(tab)
+    }
+
+    @objc private func newProjectClicked() {
+        let alert = NSAlert()
+        alert.messageText = "New project"
+        alert.informativeText = "Enter a name:"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = input
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        _ = ProjectStore.shared.create(name: name)
+        projectsTableView?.reloadData()
+    }
+
+    @objc private func renameSelectedProject() {
+        let all = ProjectStore.shared.all
+        let row = projectsTableView.selectedRow
+        guard row >= 0 && row < all.count else { return }
+        let project = all[row]
+        let alert = NSAlert()
+        alert.messageText = "Rename \(project.name)"
+        alert.informativeText = "New name:"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        input.stringValue = project.name
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = input
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        ProjectStore.shared.rename(project.id, to: name)
+        projectsTableView?.reloadData()
+    }
+
+    @objc private func toggleArchiveSelectedProject() {
+        let all = ProjectStore.shared.all
+        let row = projectsTableView.selectedRow
+        guard row >= 0 && row < all.count else { return }
+        let project = all[row]
+        ProjectStore.shared.setArchived(project.id, !project.archived)
+        projectsTableView?.reloadData()
+    }
+
+    @objc private func deleteSelectedProject() {
+        let all = ProjectStore.shared.all
+        let row = projectsTableView.selectedRow
+        guard row >= 0 && row < all.count else { return }
+        let project = all[row]
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(project.name)”?"
+        alert.informativeText = "Tagged entries keep their tag but the project disappears from filters. Can\'t be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        ProjectStore.shared.delete(project.id)
+        projectsTableView?.reloadData()
+    }
+
+    // MARK: NSTableViewDataSource / Delegate (projects table)
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        guard tableView === projectsTableView else { return 0 }
+        return ProjectStore.shared.all.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard tableView === projectsTableView, let col = tableColumn else { return nil }
+        let projects = ProjectStore.shared.all
+        guard row < projects.count else { return nil }
+        let project = projects[row]
+
+        // Count tagged entries for this project (cheap — one pass over history)
+        let count = HistoryManager.shared.getEntries().filter { $0.projectID == project.id }.count
+
+        let cell = NSTableCellView()
+        let tf = NSTextField(labelWithString: "")
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(tf)
+        NSLayoutConstraint.activate([
+            tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        switch col.identifier.rawValue {
+        case "p-name":   tf.stringValue = project.name
+        case "p-count":  tf.stringValue = String(count)
+        case "p-status": tf.stringValue = project.archived ? "Archived" : "Active"
+        default: tf.stringValue = ""
+        }
+        if project.archived { tf.textColor = .secondaryLabelColor }
+        return cell
+    }
+
     private func setupLogsTab() {
         let logsTab = NSTabViewItem(identifier: "logs")
         logsTab.label = "Logs"
@@ -1548,6 +1714,8 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate {
             customVocabulary: customVocabulary,
             customModes: validCustomModes,
             disabledBuiltInModeIds: builtInModeCheckboxes.compactMap { $0.value.state == .off ? $0.key : nil },
+            projectTaggingEnabled: currentConfig?.projectTaggingEnabled ?? true,
+            lastUsedProjectID: currentConfig?.lastUsedProjectID ?? "",
             processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4.1-nano",
             skippedUpdateVersion: currentConfig?.skippedUpdateVersion ?? "",
             lastUpdateCheck: currentConfig?.lastUpdateCheck ?? 0
@@ -1648,6 +1816,10 @@ struct Config {
     // Built-in mode IDs the user has hidden from the UI (empty by default).
     var disabledBuiltInModeIds: [String]
 
+    // Project tagging
+    var projectTaggingEnabled: Bool
+    var lastUsedProjectID: String  // UUID string; "" = none
+
     // LLM model for AI processing modes
     var processingModel: String
 
@@ -1702,6 +1874,10 @@ struct Config {
         // Disabled built-in modes
         let disabledBuiltInModeIds = json["disabledBuiltInModeIds"] as? [String] ?? []
 
+        // Project tagging
+        let projectTaggingEnabled = json["projectTaggingEnabled"] as? Bool ?? true
+        let lastUsedProjectID = json["lastUsedProjectID"] as? String ?? ""
+
         // Processing model
         let processingModel = json["processingModel"] as? String ?? "gpt-4.1-nano"
 
@@ -1723,6 +1899,8 @@ struct Config {
             customVocabulary: customVocabulary,
             customModes: customModes,
             disabledBuiltInModeIds: disabledBuiltInModeIds,
+            projectTaggingEnabled: projectTaggingEnabled,
+            lastUsedProjectID: lastUsedProjectID,
             processingModel: processingModel,
             skippedUpdateVersion: skippedUpdateVersion,
             lastUpdateCheck: lastUpdateCheck
@@ -1759,6 +1937,12 @@ struct Config {
         }
         if !disabledBuiltInModeIds.isEmpty {
             json["disabledBuiltInModeIds"] = disabledBuiltInModeIds
+        }
+        if !projectTaggingEnabled {
+            json["projectTaggingEnabled"] = false
+        }
+        if !lastUsedProjectID.isEmpty {
+            json["lastUsedProjectID"] = lastUsedProjectID
         }
         if processingModel != "gpt-4.1-nano" {
             json["processingModel"] = processingModel
@@ -2667,6 +2851,33 @@ class HistoryManager {
             self.saveHistory()
         }
     }
+
+    /// Replace an entry in-place (used for retro-tagging). The JSONL export is
+    /// append-only raw data so it isn't rewritten — the tag lives in the JSON
+    /// history until we add a dedicated update-log later.
+    func updateEntry(_ updated: TranscriptionEntry) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            if let idx = self.entries.firstIndex(where: { $0.id == updated.id }) {
+                self.entries[idx] = updated
+                self.saveHistory()
+            }
+        }
+    }
+
+    func updateEntries(_ updates: [TranscriptionEntry]) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            var dirty = false
+            for u in updates {
+                if let idx = self.entries.firstIndex(where: { $0.id == u.id }) {
+                    self.entries[idx] = u
+                    dirty = true
+                }
+            }
+            if dirty { self.saveHistory() }
+        }
+    }
 }
 
 // MARK: - Context Capture
@@ -2947,11 +3158,295 @@ class ContextCapturer {
     }
 }
 
+// MARK: - Projects
+
+struct Project: Codable {
+    let id: UUID
+    var name: String
+    var color: String?
+    var createdAt: Date
+    var archived: Bool
+
+    init(id: UUID = UUID(), name: String, color: String? = nil, createdAt: Date = Date(), archived: Bool = false) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.createdAt = createdAt
+        self.archived = archived
+    }
+}
+
+/// Owns ~/Library/Application Support/WhisperVoice/projects.json. Same
+/// queue pattern as HistoryManager so reads/writes are thread-safe.
+class ProjectStore {
+    static let shared = ProjectStore()
+
+    private let fileURL: URL
+    private let queue = DispatchQueue(label: "com.whispervoice.projects")
+    private var projectsByID: [UUID: Project] = [:]
+
+    private init() {
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/WhisperVoice")
+        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        fileURL = appSupport.appendingPathComponent("projects.json")
+        loadFromDisk()
+    }
+
+    private func loadFromDisk() {
+        queue.sync {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let list = root["projects"] as? [[String: Any]] else { return }
+            for dict in list {
+                guard let idStr = dict["id"] as? String, let id = UUID(uuidString: idStr),
+                      let name = dict["name"] as? String else { continue }
+                let color = dict["color"] as? String
+                let createdAtTS = dict["createdAt"] as? TimeInterval ?? 0
+                let archived = dict["archived"] as? Bool ?? false
+                let project = Project(id: id, name: name, color: color,
+                                      createdAt: Date(timeIntervalSince1970: createdAtTS),
+                                      archived: archived)
+                projectsByID[id] = project
+            }
+        }
+    }
+
+    private func saveToDisk() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let list: [[String: Any]] = self.projectsByID.values.map { p in
+                var d: [String: Any] = [
+                    "id": p.id.uuidString,
+                    "name": p.name,
+                    "createdAt": p.createdAt.timeIntervalSince1970,
+                    "archived": p.archived
+                ]
+                if let c = p.color { d["color"] = c }
+                return d
+            }
+            let root: [String: Any] = ["projects": list, "version": 1]
+            if let data = try? JSONSerialization.data(withJSONObject: root, options: .prettyPrinted) {
+                try? data.write(to: self.fileURL, options: .atomic)
+            }
+        }
+    }
+
+    var all: [Project] {
+        queue.sync { projectsByID.values.sorted { $0.createdAt < $1.createdAt } }
+    }
+
+    var active: [Project] {
+        all.filter { !$0.archived }
+    }
+
+    func byID(_ id: UUID) -> Project? {
+        queue.sync { projectsByID[id] }
+    }
+
+    /// Case-insensitive name lookup on active projects, used to avoid dups when the user types.
+    func byName(_ name: String) -> Project? {
+        let needle = name.lowercased()
+        return queue.sync {
+            projectsByID.values.first(where: { $0.name.lowercased() == needle && !$0.archived })
+        }
+    }
+
+    @discardableResult
+    func create(name: String) -> Project {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = byName(trimmed) { return existing }
+        let project = Project(name: trimmed)
+        queue.sync { projectsByID[project.id] = project }
+        saveToDisk()
+        return project
+    }
+
+    func rename(_ id: UUID, to newName: String) {
+        queue.sync {
+            guard var p = projectsByID[id] else { return }
+            p.name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+            projectsByID[id] = p
+        }
+        saveToDisk()
+    }
+
+    func setArchived(_ id: UUID, _ archived: Bool) {
+        queue.sync {
+            guard var p = projectsByID[id] else { return }
+            p.archived = archived
+            projectsByID[id] = p
+        }
+        saveToDisk()
+    }
+
+    func delete(_ id: UUID) {
+        queue.sync { _ = projectsByID.removeValue(forKey: id) }
+        saveToDisk()
+    }
+}
+
+struct ProjectPrediction {
+    let project: Project?
+    let confidence: Double
+    let reason: String
+    /// "predicted" when the top tier found a match, "last-used" for fallback, "none" for neither.
+    let source: String
+}
+
+/// Stateless predictor. Queries the existing history for entries that share
+/// a signal with the current context and returns the most frequently tagged
+/// project among them. No separate rule store — the history is the ground truth.
+enum ProjectPredictor {
+    /// Window of recent entries considered for prediction, seconds.
+    private static let recencyWindow: TimeInterval = 90 * 24 * 60 * 60
+
+    static func predict(ctx: DictationContext?) -> ProjectPrediction {
+        guard let ctx = ctx else { return fallback(reason: "no-context") }
+
+        let now = Date()
+        let entries = HistoryManager.shared.getEntries().filter {
+            now.timeIntervalSince($0.timestamp) <= recencyWindow
+        }
+        let activeIDs = Set(ProjectStore.shared.active.map { $0.id })
+
+        // Tier 1 — gitRemote (deterministic)
+        if let remote = ctx.signals?.gitRemote, !remote.isEmpty {
+            let key = normalize(remote)
+            let matches = entries.filter { normalize($0.signals?.gitRemote ?? "") == key && activeIDs.contains($0.projectID ?? UUID()) }
+            if let best = mostCommonProject(in: matches) {
+                return ProjectPrediction(project: best.project, confidence: 0.95,
+                                         reason: "gitRemote: \(remote)", source: "predicted")
+            }
+        }
+
+        // Tier 2 — browser host
+        if let url = ctx.signals?.browserURL, let host = urlHost(url) {
+            let matches = entries.filter {
+                guard let otherURL = $0.signals?.browserURL, let otherHost = urlHost(otherURL) else { return false }
+                return otherHost == host && activeIDs.contains($0.projectID ?? UUID())
+            }
+            if matches.count >= 2, let best = mostCommonProject(in: matches) {
+                return ProjectPrediction(project: best.project, confidence: 0.80,
+                                         reason: "host: \(host)", source: "predicted")
+            }
+        }
+
+        // Tier 3 — bundleID (only if strong agreement to avoid "Slack → always perso" locks)
+        if let bundleID = ctx.app?.bundleID {
+            let matches = entries.filter { $0.app?.bundleID == bundleID && activeIDs.contains($0.projectID ?? UUID()) }
+            if matches.count >= 3 {
+                if let best = mostCommonProject(in: matches), best.ratio >= 0.6 {
+                    return ProjectPrediction(project: best.project, confidence: 0.55,
+                                             reason: "app: \(ctx.app?.name ?? bundleID)", source: "predicted")
+                }
+            }
+        }
+
+        return fallback(reason: "no-match")
+    }
+
+    /// When the user tags a previously-untagged entry in History, offer to tag the
+    /// other untagged entries that share a strong signal. Returns matches grouped
+    /// by signal so the UI can describe what's being propagated.
+    static func findPropagationCandidates(for seed: TranscriptionEntry) -> (gitRemote: [TranscriptionEntry], browserHost: [TranscriptionEntry], bundleID: [TranscriptionEntry]) {
+        let pool = HistoryManager.shared.getEntries().filter { $0.projectID == nil && $0.id != seed.id }
+        var git: [TranscriptionEntry] = []
+        var host: [TranscriptionEntry] = []
+        var bundle: [TranscriptionEntry] = []
+
+        if let remote = seed.signals?.gitRemote, !remote.isEmpty {
+            let key = normalize(remote)
+            git = pool.filter { normalize($0.signals?.gitRemote ?? "") == key }
+        }
+        if let url = seed.signals?.browserURL, let h = urlHost(url) {
+            host = pool.filter {
+                guard let otherURL = $0.signals?.browserURL, let otherHost = urlHost(otherURL) else { return false }
+                return otherHost == h
+            }
+        }
+        if let bID = seed.app?.bundleID {
+            bundle = pool.filter { $0.app?.bundleID == bID }
+        }
+        return (git, host, bundle)
+    }
+
+    // MARK: helpers
+
+    private static func fallback(reason: String) -> ProjectPrediction {
+        let config = Config.load()
+        if let idStr = config?.lastUsedProjectID, !idStr.isEmpty, let uuid = UUID(uuidString: idStr),
+           let p = ProjectStore.shared.byID(uuid), !p.archived {
+            return ProjectPrediction(project: p, confidence: 0.30, reason: "last-used", source: "last-used")
+        }
+        return ProjectPrediction(project: nil, confidence: 0.0, reason: reason, source: "none")
+    }
+
+    private static func mostCommonProject(in entries: [TranscriptionEntry]) -> (project: Project, count: Int, ratio: Double)? {
+        var counts: [UUID: Int] = [:]
+        var total = 0
+        for e in entries {
+            if let id = e.projectID { counts[id, default: 0] += 1; total += 1 }
+        }
+        guard total > 0,
+              let (winnerID, winnerCount) = counts.max(by: { $0.value < $1.value }),
+              let project = ProjectStore.shared.byID(winnerID) else { return nil }
+        return (project, winnerCount, Double(winnerCount) / Double(total))
+    }
+
+    private static func normalize(_ remote: String) -> String {
+        var s = remote.lowercased().trimmingCharacters(in: .whitespaces)
+        // Strip .git suffix, prefixes, protocol variations
+        if s.hasSuffix(".git") { s = String(s.dropLast(4)) }
+        s = s.replacingOccurrences(of: "https://", with: "")
+        s = s.replacingOccurrences(of: "http://", with: "")
+        s = s.replacingOccurrences(of: "ssh://", with: "")
+        s = s.replacingOccurrences(of: "git@", with: "")
+        s = s.replacingOccurrences(of: ":", with: "/")  // github.com:user/repo → github.com/user/repo
+        return s
+    }
+
+    private static func urlHost(_ urlString: String) -> String? {
+        guard let u = URL(string: urlString), let host = u.host else { return nil }
+        return host.lowercased()
+    }
+}
+
+extension TranscriptionEntry {
+    /// Convenience accessor — project tag is stored in extras for backward compat.
+    var projectID: UUID? {
+        guard let s = extras?["projectID"], let id = UUID(uuidString: s) else { return nil }
+        return id
+    }
+    var projectName: String? { extras?["projectName"] }
+
+    /// Return a copy with the project tag set (or cleared if nil).
+    func tagged(with project: Project?, source: String) -> TranscriptionEntry {
+        var copy = self
+        var newExtras = copy.extras ?? [:]
+        if let project = project {
+            newExtras["projectID"] = project.id.uuidString
+            newExtras["projectName"] = project.name
+            newExtras["projectSource"] = source
+        } else {
+            newExtras.removeValue(forKey: "projectID")
+            newExtras.removeValue(forKey: "projectName")
+            newExtras.removeValue(forKey: "projectSource")
+        }
+        copy.extras = newExtras.isEmpty ? nil : newExtras
+        return copy
+    }
+}
+
 // MARK: - History Window
 
-class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableViewDataSource, NSSearchFieldDelegate {
+class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableViewDataSource, NSSearchFieldDelegate, NSMenuDelegate {
     private var window: NSWindow!
     private var searchField: NSSearchField!
+    private var projectFilterPopup: NSPopUpButton!
+    /// Selected filter: nil = all, "untagged" = only entries without a project,
+    /// or a UUID string for a specific project.
+    private var projectFilterKey: String? = nil
     private var tableView: NSTableView!
     private var entries: [TranscriptionEntry] = []
     private var filteredEntries: [TranscriptionEntry] = []
@@ -2976,11 +3471,18 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
 
         guard let contentView = window.contentView else { return }
 
-        // Search field
-        searchField = NSSearchField(frame: NSRect(x: 16, y: 410, width: 568, height: 28))
+        // Search field (left)
+        searchField = NSSearchField(frame: NSRect(x: 16, y: 410, width: 358, height: 28))
         searchField.placeholderString = "Search transcriptions..."
         searchField.delegate = self
         contentView.addSubview(searchField)
+
+        // Project filter popup (right)
+        projectFilterPopup = NSPopUpButton(frame: NSRect(x: 384, y: 410, width: 200, height: 28))
+        projectFilterPopup.target = self
+        projectFilterPopup.action = #selector(projectFilterChanged)
+        contentView.addSubview(projectFilterPopup)
+        reloadProjectFilterPopup()
 
         // Table view with scroll
         let scrollView = NSScrollView(frame: NSRect(x: 16, y: 50, width: 568, height: 350))
@@ -3019,6 +3521,11 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         scrollView.documentView = tableView
         contentView.addSubview(scrollView)
 
+        // Right-click menu (dynamic — built on open)
+        let menu = NSMenu()
+        menu.delegate = self
+        tableView.menu = menu
+
         // Buttons
         let copyButton = NSButton(title: "Copy", target: self, action: #selector(copySelectedEntry))
         copyButton.bezelStyle = .rounded
@@ -3044,8 +3551,60 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
 
     private func reloadData() {
         entries = HistoryManager.shared.getEntries()
-        filteredEntries = entries
+        applyFilters()
+    }
+
+    private func applyFilters() {
+        let search = searchField?.stringValue.lowercased() ?? ""
+        let key = projectFilterKey
+        filteredEntries = entries.filter { e in
+            // Project filter
+            if let key = key {
+                if key == "untagged" {
+                    if e.projectID != nil { return false }
+                } else {
+                    guard let pid = e.projectID?.uuidString, pid == key else { return false }
+                }
+            }
+            // Text filter
+            if !search.isEmpty, !e.text.lowercased().contains(search) { return false }
+            return true
+        }
         tableView.reloadData()
+    }
+
+    private func reloadProjectFilterPopup() {
+        let prior = projectFilterKey
+        projectFilterPopup.removeAllItems()
+
+        let allItem = NSMenuItem(title: "All projects", action: nil, keyEquivalent: "")
+        allItem.representedObject = nil as String?
+        projectFilterPopup.menu?.addItem(allItem)
+
+        let untaggedItem = NSMenuItem(title: "Untagged", action: nil, keyEquivalent: "")
+        untaggedItem.representedObject = "untagged"
+        projectFilterPopup.menu?.addItem(untaggedItem)
+
+        projectFilterPopup.menu?.addItem(.separator())
+
+        for project in ProjectStore.shared.active {
+            let item = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
+            item.representedObject = project.id.uuidString
+            projectFilterPopup.menu?.addItem(item)
+        }
+
+        // Restore prior selection
+        if let prior = prior, let match = projectFilterPopup.menu?.items.first(where: { ($0.representedObject as? String) == prior }) {
+            projectFilterPopup.select(match)
+        } else {
+            projectFilterPopup.selectItem(at: 0)
+            projectFilterKey = nil
+        }
+    }
+
+    @objc private func projectFilterChanged() {
+        projectFilterKey = projectFilterPopup.selectedItem?.representedObject as? String
+        applyFilters()
     }
 
     // MARK: - NSTableViewDataSource
@@ -3102,13 +3661,151 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
     // MARK: - NSSearchFieldDelegate
 
     func controlTextDidChange(_ obj: Notification) {
-        let query = searchField.stringValue
-        if query.isEmpty {
-            filteredEntries = entries
-        } else {
-            filteredEntries = HistoryManager.shared.search(query: query)
+        applyFilters()
+    }
+
+    // MARK: - NSMenuDelegate (right-click on entries)
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let row = tableView.clickedRow
+        guard row >= 0 && row < filteredEntries.count else { return }
+        let entry = filteredEntries[row]
+
+        let header = NSMenuItem(title: entry.projectName.map { "Tagged: \($0)" } ?? "Untagged", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
+
+        let tagAs = NSMenuItem(title: "Tag as…", action: nil, keyEquivalent: "")
+        let tagMenu = NSMenu()
+        for project in ProjectStore.shared.active {
+            let it = NSMenuItem(title: project.name, action: #selector(tagEntryAs(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = ["entryID": entry.id.uuidString, "projectID": project.id.uuidString]
+            if entry.projectID == project.id { it.state = .on }
+            tagMenu.addItem(it)
         }
-        tableView.reloadData()
+        if !ProjectStore.shared.active.isEmpty { tagMenu.addItem(.separator()) }
+        let create = NSMenuItem(title: "Create new project…", action: #selector(createAndTagEntry(_:)), keyEquivalent: "")
+        create.target = self
+        create.representedObject = entry.id.uuidString
+        tagMenu.addItem(create)
+        tagAs.submenu = tagMenu
+        menu.addItem(tagAs)
+
+        if entry.projectID != nil {
+            let untag = NSMenuItem(title: "Untag", action: #selector(untagEntry(_:)), keyEquivalent: "")
+            untag.target = self
+            untag.representedObject = entry.id.uuidString
+            menu.addItem(untag)
+        }
+
+        menu.addItem(.separator())
+
+        let copyItem = NSMenuItem(title: "Copy text", action: #selector(copyRow(_:)), keyEquivalent: "c")
+        copyItem.target = self
+        copyItem.representedObject = entry.id.uuidString
+        menu.addItem(copyItem)
+
+        let del = NSMenuItem(title: "Delete", action: #selector(deleteRow(_:)), keyEquivalent: "")
+        del.target = self
+        del.representedObject = entry.id.uuidString
+        menu.addItem(del)
+    }
+
+    @objc private func tagEntryAs(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? [String: String],
+              let entryIDStr = payload["entryID"], let entryID = UUID(uuidString: entryIDStr),
+              let projectIDStr = payload["projectID"], let projectID = UUID(uuidString: projectIDStr),
+              let entry = entries.first(where: { $0.id == entryID }),
+              let project = ProjectStore.shared.byID(projectID) else { return }
+        applyTag(to: entry, project: project)
+    }
+
+    @objc private func untagEntry(_ sender: NSMenuItem) {
+        guard let idStr = sender.representedObject as? String, let id = UUID(uuidString: idStr),
+              let entry = entries.first(where: { $0.id == id }) else { return }
+        let updated = entry.tagged(with: nil, source: "manual")
+        HistoryManager.shared.updateEntry(updated)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.reloadData() }
+    }
+
+    @objc private func createAndTagEntry(_ sender: NSMenuItem) {
+        guard let idStr = sender.representedObject as? String, let id = UUID(uuidString: idStr),
+              let entry = entries.first(where: { $0.id == id }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "New project"
+        alert.informativeText = "Enter a name for the new project:"
+        alert.alertStyle = .informational
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = input
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let project = ProjectStore.shared.create(name: name)
+        applyTag(to: entry, project: project)
+    }
+
+    @objc private func copyRow(_ sender: NSMenuItem) {
+        guard let idStr = sender.representedObject as? String, let id = UUID(uuidString: idStr),
+              let entry = entries.first(where: { $0.id == id }) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(entry.text, forType: .string)
+    }
+
+    @objc private func deleteRow(_ sender: NSMenuItem) {
+        guard let idStr = sender.representedObject as? String, let id = UUID(uuidString: idStr) else { return }
+        HistoryManager.shared.deleteEntry(id: id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.reloadData() }
+    }
+
+    /// Apply a project to an entry. If the entry was previously untagged, offer to
+    /// propagate the tag to other untagged entries with matching signals.
+    private func applyTag(to entry: TranscriptionEntry, project: Project) {
+        let wasUntagged = entry.projectID == nil
+        let updated = entry.tagged(with: project, source: "manual")
+        HistoryManager.shared.updateEntry(updated)
+        reloadProjectFilterPopup()
+
+        if wasUntagged {
+            let candidates = ProjectPredictor.findPropagationCandidates(for: entry)
+            promptPropagation(project: project, candidates: candidates)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.reloadData() }
+        }
+    }
+
+    private func promptPropagation(project: Project, candidates: (gitRemote: [TranscriptionEntry], browserHost: [TranscriptionEntry], bundleID: [TranscriptionEntry])) {
+        // Pick the tightest signal that has matches.
+        let matches: [TranscriptionEntry]
+        let desc: String
+        if !candidates.gitRemote.isEmpty {
+            matches = candidates.gitRemote; desc = "same gitRemote"
+        } else if !candidates.browserHost.isEmpty {
+            matches = candidates.browserHost; desc = "same website"
+        } else if !candidates.bundleID.isEmpty {
+            matches = candidates.bundleID; desc = "same app"
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.reloadData() }
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Tag \(matches.count) other untagged entr\(matches.count == 1 ? "y" : "ies") with \(project.name)?"
+        alert.informativeText = "They share the \(desc). You can always change them later."
+        alert.addButton(withTitle: "Tag all")
+        alert.addButton(withTitle: "Only this one")
+        alert.alertStyle = .informational
+        let choice = alert.runModal()
+        if choice == .alertFirstButtonReturn {
+            let updates = matches.map { $0.tagged(with: project, source: "retro") }
+            HistoryManager.shared.updateEntries(updates)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.reloadData() }
     }
 
     // MARK: - Actions
@@ -3348,6 +4045,12 @@ class RecordingWindow: NSObject {
     private var stopButton: NSButton!
     private var cancelButton: NSButton!
     private var modeSelector: ModeSelectorView!
+    private var projectChip: ProjectChipView!
+    private var projectPicker: NSPopover?
+
+    /// Called when user picks a different project (or nil = untag) for the
+    /// current recording. AppDelegate uses this to update its pending tag.
+    var onProjectChanged: ((Project?, String) -> Void)?
 
     private var updateTimer: Timer?
     private var recordingStartTime: Date?
@@ -3369,9 +4072,9 @@ class RecordingWindow: NSObject {
     }
 
     private func setupWindow() {
-        // Create floating panel - taller to fit mode selector
+        // Create floating panel — taller to fit mode selector and project chip.
         window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 216),
             styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -3391,36 +4094,41 @@ class RecordingWindow: NSObject {
         contentView.layer?.cornerRadius = 14
 
         // Waveform view at top (below title bar area)
-        waveformView = WaveformView(frame: NSRect(x: 16, y: 120, width: 328, height: 45))
+        waveformView = WaveformView(frame: NSRect(x: 16, y: 156, width: 328, height: 45))
         contentView.addSubview(waveformView)
 
         // Status row: dot + label + timer
-        statusDot = NSView(frame: NSRect(x: 16, y: 96, width: 10, height: 10))
+        statusDot = NSView(frame: NSRect(x: 16, y: 132, width: 10, height: 10))
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
         statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
         contentView.addSubview(statusDot)
 
         statusLabel = NSTextField(labelWithString: "Recording")
-        statusLabel.frame = NSRect(x: 32, y: 93, width: 120, height: 18)
+        statusLabel.frame = NSRect(x: 32, y: 129, width: 120, height: 18)
         statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         statusLabel.textColor = .white
         contentView.addSubview(statusLabel)
 
         timerLabel = NSTextField(labelWithString: "0:00")
-        timerLabel.frame = NSRect(x: 290, y: 93, width: 55, height: 18)
+        timerLabel.frame = NSRect(x: 290, y: 129, width: 55, height: 18)
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.6)
         timerLabel.alignment = .right
         contentView.addSubview(timerLabel)
 
         // Mode selector
-        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 52, width: 336, height: 36))
+        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 88, width: 336, height: 36))
         modeSelector.onModeChanged = { [weak self] index in
             let mode = ModeManager.shared.modes[index]
             self?.onModeChanged?(mode)
         }
         contentView.addSubview(modeSelector)
+
+        // Project chip — between mode selector and action buttons
+        projectChip = ProjectChipView(frame: NSRect(x: 12, y: 48, width: 336, height: 30))
+        projectChip.onClick = { [weak self] in self?.showProjectPicker() }
+        contentView.addSubview(projectChip)
 
         // Cancel button
         cancelButton = NSButton(frame: NSRect(x: 16, y: 12, width: 80, height: 28))
@@ -3553,6 +4261,233 @@ class RecordingWindow: NSObject {
     @objc private func cancelClicked() {
         hide()
         onCancel?()
+    }
+
+    // MARK: - Project tagging
+
+    func setProject(_ project: Project?, reason: String, confidence: Double) {
+        projectChip?.set(project: project, reason: reason, confidence: confidence)
+    }
+
+    private func showProjectPicker() {
+        guard let chip = projectChip else { return }
+        let picker = ProjectPickerViewController(
+            current: chip.currentProject,
+            onPick: { [weak self] project, source in
+                self?.projectPicker?.performClose(nil)
+                self?.projectPicker = nil
+                let reason = project == nil ? "cleared" : "manual"
+                self?.projectChip?.set(project: project, reason: reason, confidence: 1.0)
+                self?.onProjectChanged?(project, source)
+            }
+        )
+        let popover = NSPopover()
+        popover.contentViewController = picker
+        popover.behavior = .transient
+        popover.show(relativeTo: chip.bounds, of: chip, preferredEdge: .maxY)
+        projectPicker = popover
+    }
+}
+
+// MARK: - Project chip + picker
+
+/// Small pill shown inside RecordingWindow. Click opens the picker popover.
+class ProjectChipView: NSView {
+    private(set) var currentProject: Project?
+    private let label = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    var onClick: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.08).cgColor
+
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textColor = .white
+        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        set(project: nil, reason: "no-signal", confidence: 0)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = trackingArea { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil)
+        addTrackingArea(t)
+        trackingArea = t
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.16).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.08).cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+
+    func set(project: Project?, reason: String, confidence: Double) {
+        currentProject = project
+        let muted = NSColor.white.withAlphaComponent(0.5)
+        let primary = NSColor.white
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: "in: ", attributes: [.foregroundColor: muted]))
+        if let project = project {
+            let dotColor = project.color.flatMap { NSColor.fromHex($0) } ?? NSColor.systemGreen
+            attr.append(NSAttributedString(string: "● ", attributes: [.foregroundColor: dotColor]))
+            attr.append(NSAttributedString(string: project.name, attributes: [.foregroundColor: primary]))
+            if confidence > 0 && reason != "manual" && reason != "cleared" {
+                let hint = reason == "last-used" ? "   (last-used)" : "   \(Int(confidence * 100))%"
+                attr.append(NSAttributedString(string: hint, attributes: [.foregroundColor: muted, .font: NSFont.systemFont(ofSize: 11)]))
+            }
+        } else {
+            attr.append(NSAttributedString(string: "(untagged)   click to pick", attributes: [.foregroundColor: muted]))
+        }
+        label.attributedStringValue = attr
+    }
+}
+
+/// Floating picker. NSTableView of active projects + search field that doubles
+/// as "Create new…" input (⏎ creates when name is new). "Untag" button clears.
+class ProjectPickerViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+    private let current: Project?
+    private let onPick: (Project?, String) -> Void
+
+    private let searchField = NSTextField()
+    private let tableView = NSTableView()
+    private let untagButton = NSButton(title: "Untag", target: nil, action: nil)
+    private var filtered: [Project] = []
+
+    init(current: Project?, onPick: @escaping (Project?, String) -> Void) {
+        self.current = current
+        self.onPick = onPick
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 320))
+
+        searchField.placeholderString = "Filter or type to create…"
+        searchField.delegate = self
+        searchField.target = self
+        searchField.action = #selector(searchEnter)
+        searchField.frame = NSRect(x: 10, y: 280, width: 260, height: 24)
+        root.addSubview(searchField)
+
+        let scroll = NSScrollView(frame: NSRect(x: 10, y: 46, width: 260, height: 228))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+
+        tableView.headerView = nil
+        tableView.rowSizeStyle = .small
+        tableView.dataSource = self
+        tableView.delegate = self
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("project"))
+        col.width = 240
+        tableView.addTableColumn(col)
+        tableView.target = self
+        tableView.doubleAction = #selector(rowDoubleClicked)
+        scroll.documentView = tableView
+        root.addSubview(scroll)
+
+        untagButton.target = self
+        untagButton.action = #selector(untagClicked)
+        untagButton.bezelStyle = .rounded
+        untagButton.frame = NSRect(x: 10, y: 10, width: 80, height: 28)
+        root.addSubview(untagButton)
+
+        let createLabel = NSTextField(labelWithString: "⏎ creates if name is new")
+        createLabel.textColor = .secondaryLabelColor
+        createLabel.font = NSFont.systemFont(ofSize: 10)
+        createLabel.frame = NSRect(x: 100, y: 14, width: 170, height: 20)
+        root.addSubview(createLabel)
+
+        self.view = root
+        refreshList()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        DispatchQueue.main.async { [weak self] in
+            self?.view.window?.makeFirstResponder(self?.searchField)
+        }
+    }
+
+    private func refreshList() {
+        let query = searchField.stringValue.lowercased().trimmingCharacters(in: .whitespaces)
+        let all = ProjectStore.shared.active
+        if query.isEmpty { filtered = all } else { filtered = all.filter { $0.name.lowercased().contains(query) } }
+        tableView.reloadData()
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }
+
+    func tableView(_ tv: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let cell = NSTableCellView()
+        let tf = NSTextField(labelWithString: filtered[row].name)
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(tf)
+        NSLayoutConstraint.activate([
+            tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
+            tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        if filtered[row].id == current?.id {
+            tf.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        }
+        return cell
+    }
+
+    @objc private func rowDoubleClicked() {
+        let row = tableView.selectedRow
+        guard row >= 0 && row < filtered.count else { return }
+        onPick(filtered[row], "manual")
+    }
+
+    @objc private func untagClicked() {
+        onPick(nil, "manual")
+    }
+
+    @objc private func searchEnter() {
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty { return }
+        if let existing = ProjectStore.shared.byName(query) {
+            onPick(existing, "manual")
+        } else {
+            let created = ProjectStore.shared.create(name: query)
+            onPick(created, "manual")
+        }
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        refreshList()
+    }
+}
+
+extension NSColor {
+    /// Parse "#rrggbb" or "rrggbb" into an NSColor, nil on malformed input.
+    static func fromHex(_ hex: String) -> NSColor? {
+        var s = hex
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        let r = CGFloat((v >> 16) & 0xff) / 255
+        let g = CGFloat((v >> 8) & 0xff) / 255
+        let b = CGFloat(v & 0xff) / 255
+        return NSColor(red: r, green: g, blue: b, alpha: 1)
     }
 }
 
@@ -4797,6 +5732,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isPushToTalkActive = false  // Track if current recording is from PTT
     private var capturedContext: String?  // Context captured for Super Mode
     private var pendingDictationContext: DictationContext?  // Captured at recording start, attached on save
+    private var pendingProject: Project?  // User-facing project chip selection; nil = untagged
+    private var pendingProjectSource: String = "none"  // "predicted" | "manual" | "last-used" | "none"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Eagerly init HistoryManager so the JSONL export dir is created and the
@@ -5025,6 +5962,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 customVocabulary: [],
                 customModes: [],
                 disabledBuiltInModeIds: [],
+                projectTaggingEnabled: true,
+                lastUsedProjectID: "",
                 processingModel: "gpt-4.1-nano",
                 skippedUpdateVersion: "",
                 lastUpdateCheck: 0
@@ -5276,6 +6215,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingWindow?.onCancel = { [weak self] in
             self?.cancelRecording()
         }
+        recordingWindow?.onProjectChanged = { [weak self] project, source in
+            self?.pendingProject = project
+            self?.pendingProjectSource = source
+        }
     }
 
     /// Capture currently selected text in the active app by simulating Cmd+C
@@ -5331,7 +6274,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Runs off-main; completion arrives asynchronously and attaches to pending entry.
         pendingDictationContext = nil
         ContextCapturer.shared.captureNow { [weak self] ctx in
-            self?.pendingDictationContext = ctx
+            guard let self = self else { return }
+            self.pendingDictationContext = ctx
+            // Predict project from the captured context + history.
+            let prediction = ProjectPredictor.predict(ctx: ctx)
+            self.pendingProject = prediction.project
+            self.pendingProjectSource = prediction.source
+            // Reflect the prediction in the recording panel if it's up.
+            self.recordingWindow?.setProject(prediction.project,
+                                             reason: prediction.reason,
+                                             confidence: prediction.confidence)
         }
 
         // Capture context for Super Mode before starting recording
@@ -5475,15 +6427,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let modeName = selectedModeForCurrentRecording?.name ?? "Voice-to-Text"
         let ctx = pendingDictationContext
         pendingDictationContext = nil
+        let project = pendingProject
+        let projectSource = pendingProjectSource
+        pendingProject = nil
+        pendingProjectSource = "none"
+
+        var extras = ctx?.extras ?? [:]
+        if let project = project {
+            extras["projectID"] = project.id.uuidString
+            extras["projectName"] = project.name
+            extras["projectSource"] = projectSource
+        }
         let entry = TranscriptionEntry(
             text: trimmedText,
             durationSeconds: duration,
             provider: "\(provider) + \(modeName)",
             app: ctx?.app,
             signals: ctx?.signals,
-            extras: ctx?.extras
+            extras: extras.isEmpty ? nil : extras
         )
         HistoryManager.shared.addEntry(entry)
+
+        // Persist last-used project (even for manual picks and last-used fallbacks)
+        // so that it survives restarts and feeds the no-signal fallback next time.
+        if let project = project, var cfg = Config.load(), cfg.lastUsedProjectID != project.id.uuidString {
+            cfg.lastUsedProjectID = project.id.uuidString
+            cfg.save()
+        }
 
         // Play completion sound
         NSSound(named: "Glass")?.play()
