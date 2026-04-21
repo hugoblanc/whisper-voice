@@ -3559,6 +3559,146 @@ extension TranscriptionEntry {
     }
 }
 
+// MARK: - History Entry Details popover
+
+/// Read-only popover that dumps every captured signal for a single entry.
+/// Used from the History right-click menu so the user can understand *why*
+/// a dictation was categorised the way it was.
+class HistoryEntryDetailViewController: NSViewController {
+    private let entry: TranscriptionEntry
+
+    init(entry: TranscriptionEntry) {
+        self.entry = entry
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 360))
+
+        let scroll = NSScrollView(frame: root.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+
+        let textView = NSTextView(frame: scroll.bounds)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textStorage?.setAttributedString(buildDetails())
+        scroll.documentView = textView
+
+        root.addSubview(scroll)
+        self.view = root
+    }
+
+    private func buildDetails() -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        out.append(header("Transcription"))
+        out.append(body(entry.text))
+        out.append(NSAttributedString(string: "\n"))
+
+        out.append(header("Meta"))
+        out.append(kv("Recorded",  formatDate(entry.timestamp)))
+        out.append(kv("Duration",  String(format: "%.1f s", entry.durationSeconds)))
+        out.append(kv("Provider",  entry.provider))
+        out.append(NSAttributedString(string: "\n"))
+
+        out.append(header("App"))
+        if let app = entry.app {
+            out.append(kv("Name",      app.name))
+            out.append(kv("Bundle ID", app.bundleID))
+        } else {
+            out.append(muted("(not captured)"))
+        }
+        out.append(NSAttributedString(string: "\n"))
+
+        out.append(header("Signals"))
+        if let s = entry.signals {
+            if let v = s.windowTitle, !v.isEmpty      { out.append(kv("Window",        v)) }
+            if let v = s.browserURL, !v.isEmpty       { out.append(kv("Browser URL",   v)) }
+            if let v = s.browserTabTitle, !v.isEmpty  { out.append(kv("Browser Tab",   v)) }
+            if let v = s.cwd, !v.isEmpty              { out.append(kv("cwd",           v)) }
+            if let v = s.foregroundCmd, !v.isEmpty    { out.append(kv("Foreground",    v)) }
+            if let v = s.gitRemote, !v.isEmpty        { out.append(kv("git remote",    v)) }
+            if let v = s.gitBranch, !v.isEmpty        { out.append(kv("git branch",    v)) }
+        } else {
+            out.append(muted("(none)"))
+        }
+        out.append(NSAttributedString(string: "\n"))
+
+        out.append(header("Project tag"))
+        if let name = entry.projectName {
+            out.append(kv("Project", name))
+            if let src = entry.extras?["projectSource"] { out.append(kv("Source", src)) }
+            if let reason = entry.extras?["projectReason"] { out.append(kv("Reason", reason)) }
+            if let conf = entry.extras?["projectConfidence"] { out.append(kv("Confidence", conf)) }
+            if let hint = ProjectPredictor.workspaceHint(bundleID: entry.app?.bundleID, windowTitle: entry.signals?.windowTitle) {
+                out.append(kv("Workspace hint", hint))
+            }
+        } else {
+            out.append(muted("Untagged"))
+            if let hint = ProjectPredictor.workspaceHint(bundleID: entry.app?.bundleID, windowTitle: entry.signals?.windowTitle) {
+                out.append(kv("Workspace hint", hint))
+            }
+        }
+
+        // Dump extras that aren't part of the project block — future-proofing
+        // so new signals land here automatically.
+        if let extras = entry.extras {
+            let shown: Set<String> = ["projectID", "projectName", "projectSource", "projectConfidence"]
+            let remainder = extras.filter { !shown.contains($0.key) }
+            if !remainder.isEmpty {
+                out.append(NSAttributedString(string: "\n"))
+                out.append(header("Extras"))
+                for (k, v) in remainder.sorted(by: { $0.key < $1.key }) {
+                    out.append(kv(k, v))
+                }
+            }
+        }
+        return out
+    }
+
+    private func header(_ s: String) -> NSAttributedString {
+        NSAttributedString(string: "\(s)\n", attributes: [
+            .font: NSFont.boldSystemFont(ofSize: 12),
+            .foregroundColor: NSColor.labelColor,
+        ])
+    }
+    private func body(_ s: String) -> NSAttributedString {
+        NSAttributedString(string: "\(s)\n", attributes: [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.labelColor,
+        ])
+    }
+    private func muted(_ s: String) -> NSAttributedString {
+        NSAttributedString(string: "\(s)\n", attributes: [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ])
+    }
+    private func kv(_ key: String, _ value: String) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        out.append(NSAttributedString(string: "\(key): ", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        out.append(NSAttributedString(string: "\(value)\n", attributes: [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.labelColor,
+        ]))
+        return out
+    }
+    private func formatDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .medium
+        return f.string(from: d)
+    }
+}
+
 // MARK: - History Window
 
 class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableViewDataSource, NSSearchFieldDelegate, NSMenuDelegate {
@@ -3624,16 +3764,23 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         // Columns
         let textColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("text"))
         textColumn.title = "Transcription"
-        textColumn.width = 380
-        textColumn.minWidth = 200
+        textColumn.width = 290
+        textColumn.minWidth = 180
         textColumn.resizingMask = .autoresizingMask
         tableView.addTableColumn(textColumn)
 
+        let projectColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("project"))
+        projectColumn.title = "Project"
+        projectColumn.width = 130
+        projectColumn.minWidth = 80
+        projectColumn.resizingMask = .userResizingMask
+        tableView.addTableColumn(projectColumn)
+
         let dateColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("date"))
         dateColumn.title = "Date"
-        dateColumn.width = 150
-        dateColumn.minWidth = 150
-        dateColumn.maxWidth = 150
+        dateColumn.width = 140
+        dateColumn.minWidth = 120
+        dateColumn.maxWidth = 160
         dateColumn.resizingMask = .userResizingMask
         tableView.addTableColumn(dateColumn)
 
@@ -3766,6 +3913,27 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
             cellView?.textField?.stringValue = entry.text
             cellView?.textField?.font = NSFont.systemFont(ofSize: 12)
             cellView?.textField?.textColor = .labelColor
+            cellView?.textField?.alignment = .left
+        } else if column.identifier.rawValue == "project" {
+            if let name = entry.projectName {
+                let attr = NSMutableAttributedString()
+                attr.append(NSAttributedString(string: "● ",
+                    attributes: [.foregroundColor: NSColor.systemGreen]))
+                attr.append(NSAttributedString(string: name,
+                    attributes: [.foregroundColor: NSColor.labelColor,
+                                 .font: NSFont.systemFont(ofSize: 12)]))
+                if let src = entry.extras?["projectSource"], src != "manual" {
+                    attr.append(NSAttributedString(string: "  \(Self.shortSourceLabel(src))",
+                        attributes: [.foregroundColor: NSColor.tertiaryLabelColor,
+                                     .font: NSFont.systemFont(ofSize: 10)]))
+                }
+                cellView?.textField?.attributedStringValue = attr
+            } else {
+                cellView?.textField?.stringValue = "—"
+                cellView?.textField?.textColor = .tertiaryLabelColor
+                cellView?.textField?.font = NSFont.systemFont(ofSize: 12)
+            }
+            cellView?.textField?.alignment = .left
         } else if column.identifier.rawValue == "date" {
             let formatter = DateFormatter()
             formatter.dateStyle = .short
@@ -3777,6 +3945,16 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         }
 
         return cellView
+    }
+
+    /// Short label for the projectSource extras value ("predicted" → "auto", etc).
+    private static func shortSourceLabel(_ source: String) -> String {
+        switch source {
+        case "predicted": return "auto"
+        case "retro":     return "retro"
+        case "last-used": return "last"
+        default:          return source
+        }
     }
 
     // MARK: - NSSearchFieldDelegate
@@ -3823,6 +4001,11 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         }
 
         menu.addItem(.separator())
+
+        let details = NSMenuItem(title: "Show details…", action: #selector(showRowDetails(_:)), keyEquivalent: "")
+        details.target = self
+        details.representedObject = entry.id.uuidString
+        menu.addItem(details)
 
         let copyItem = NSMenuItem(title: "Copy text", action: #selector(copyRow(_:)), keyEquivalent: "c")
         copyItem.target = self
@@ -3876,6 +4059,31 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
               let entry = entries.first(where: { $0.id == id }) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(entry.text, forType: .string)
+    }
+
+    @objc private func showRowDetails(_ sender: NSMenuItem) {
+        guard let idStr = sender.representedObject as? String, let id = UUID(uuidString: idStr),
+              let entry = entries.first(where: { $0.id == id }) else { return }
+        showDetailsPopover(for: entry)
+    }
+
+    private func showDetailsPopover(for entry: TranscriptionEntry) {
+        let vc = HistoryEntryDetailViewController(entry: entry)
+        let popover = NSPopover()
+        popover.contentViewController = vc
+        popover.behavior = .transient
+        // Anchor to the clicked row if possible, else the table.
+        let row = filteredEntries.firstIndex(where: { $0.id == entry.id }) ?? tableView.clickedRow
+        let rect: NSRect
+        let anchor: NSView
+        if row >= 0, let rowView = tableView.rowView(atRow: row, makeIfNecessary: false) {
+            anchor = rowView
+            rect = rowView.bounds
+        } else {
+            anchor = tableView
+            rect = tableView.visibleRect
+        }
+        popover.show(relativeTo: rect, of: anchor, preferredEdge: .maxX)
     }
 
     @objc private func deleteRow(_ sender: NSMenuItem) {
@@ -5871,6 +6079,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingDictationContext: DictationContext?  // Captured at recording start, attached on save
     private var pendingProject: Project?  // User-facing project chip selection; nil = untagged
     private var pendingProjectSource: String = "none"  // "predicted" | "manual" | "last-used" | "none"
+    private var pendingProjectReason: String = ""      // What triggered the prediction — for details popover
+    private var pendingProjectConfidence: Double = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Eagerly init HistoryManager so the JSONL export dir is created and the
@@ -6417,6 +6627,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let prediction = ProjectPredictor.predict(ctx: ctx)
             self.pendingProject = prediction.project
             self.pendingProjectSource = prediction.source
+            self.pendingProjectReason = prediction.reason
+            self.pendingProjectConfidence = prediction.confidence
             // Reflect the prediction in the recording panel if it's up.
             self.recordingWindow?.setProject(prediction.project,
                                              reason: prediction.reason,
@@ -6566,14 +6778,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pendingDictationContext = nil
         let project = pendingProject
         let projectSource = pendingProjectSource
+        let projectReason = pendingProjectReason
+        let projectConfidence = pendingProjectConfidence
         pendingProject = nil
         pendingProjectSource = "none"
+        pendingProjectReason = ""
+        pendingProjectConfidence = 0
 
         var extras = ctx?.extras ?? [:]
         if let project = project {
             extras["projectID"] = project.id.uuidString
             extras["projectName"] = project.name
             extras["projectSource"] = projectSource
+            if !projectReason.isEmpty { extras["projectReason"] = projectReason }
+            if projectConfidence > 0 {
+                extras["projectConfidence"] = String(format: "%.2f", projectConfidence)
+            }
         }
         let entry = TranscriptionEntry(
             text: trimmedText,
