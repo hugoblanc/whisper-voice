@@ -44,6 +44,21 @@ cd whisper-voice
 
 ---
 
+## Documentation
+
+Short, focused pages — one question per doc:
+
+- **[Modes](docs/modes.md)** — Brut, Clean, Slack, Markdown… what each does, how to author your own
+- **[Auto-mode](docs/auto-mode.md)** — per-app mode override (Slack → Slack mode, Mail → Formel…)
+- **[Projets](docs/projects.md)** — tagging dictations by project, retro-tagging
+- **[Vocabulaire personnalisé](docs/vocabulary.md)** — teach Whisper your proper nouns
+- **[Pressepapier multi-format](docs/clipboard.md)** — why Slack renders `*bold*` correctly at paste (and why Terminal doesn't)
+- **[Raccourcis & Push-to-Talk](docs/shortcuts.md)** — configure hotkeys, troubleshoot
+
+Accessible depuis l'app : menu barre de statut → **Help**.
+
+---
+
 ## Features
 
 ### Recording Window
@@ -64,7 +79,7 @@ Switch modes by pressing **Shift** during recording:
 | **Markdown** | Converts to headers, lists, code blocks |
 | **Super** | Select text, speak an instruction, AI transforms it |
 
-> AI modes require an OpenAI API key (configurable model: GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1)
+> AI modes require an OpenAI API key (configurable model: GPT-5.4 / Mini / Nano, GPT-4.1 family, GPT-4o family)
 
 ### Transcription History
 - **Cmd+H** to open history window
@@ -84,7 +99,7 @@ The app checks for updates on launch and you can manually check via the menu bar
 ### Other Features
 - **Multi-provider support**: OpenAI, Mistral, or Local (whisper.cpp)
 - **Offline mode**: 100% local transcription with whisper.cpp
-- **Configurable LLM model**: Choose between GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1
+- **Configurable LLM model**: Choose between GPT-5.4 / Mini / Nano, GPT-4.1 family, GPT-4o family
 - **Preferences window**: Change settings without editing config (Cmd+,)
 - **Built-in logs**: Debug issues from Preferences → Logs tab
 - **Setup wizard**: Guided first-time configuration
@@ -242,7 +257,7 @@ whisper-voice/
 - **Custom Vocabulary**: Add proper nouns/technical terms for better recognition
 - **Custom Modes**: Create your own processing modes with custom prompts
 - **Auto-Update**: Check for updates and install directly from the app
-- **LLM Model Choice**: Pick between GPT-4o-mini, GPT-4o, GPT-4.1-mini, GPT-4.1
+- **LLM Model Choice**: Pick between GPT-5.4 / Mini / Nano, GPT-4.1 family, GPT-4o family
 
 ## What's New in v3.1
 

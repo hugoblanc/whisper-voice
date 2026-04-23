@@ -637,6 +637,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         setupGeneralTab()
         setupShortcutsTab()
         setupModesTab()
+        setupAutoModeTab()
         setupProjectsTab()
         setupLogsTab()
 
@@ -1153,6 +1154,192 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         refreshModesUI()
     }
 
+    // MARK: - Auto-mode tab (per-app mode override)
+
+    private var autoModeTableView: NSTableView!
+    private var autoModeEnabledCheckbox: NSButton!
+    /// Snapshot of bundleID -> modeId sorted by app name for table display.
+    private var autoModeRows: [(bundleID: String, modeId: String)] = []
+
+    private func setupAutoModeTab() {
+        let tab = NSTabViewItem(identifier: "auto-mode")
+        tab.label = "Auto-mode"
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 380))
+
+        let titleLabel = NSTextField(labelWithString: "Auto-select mode by app")
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 13)
+        titleLabel.frame = NSRect(x: 20, y: 350, width: 300, height: 20)
+        view.addSubview(titleLabel)
+
+        let hint = NSTextField(labelWithString: "Pick an app, pick a mode. When you dictate in that app, the mode switches automatically.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = NSFont.systemFont(ofSize: 11)
+        hint.frame = NSRect(x: 20, y: 330, width: 420, height: 16)
+        view.addSubview(hint)
+
+        let addButton = NSButton(title: "+ Add app", target: self, action: #selector(autoModeAddAppClicked))
+        addButton.bezelStyle = .rounded
+        addButton.frame = NSRect(x: 340, y: 345, width: 100, height: 26)
+        view.addSubview(addButton)
+
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 80, width: 420, height: 240))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        autoModeTableView = NSTableView()
+        autoModeTableView.rowHeight = 24
+        autoModeTableView.headerView = NSTableHeaderView()
+        autoModeTableView.dataSource = self
+        autoModeTableView.delegate = self
+        let appCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("am-app"))
+        appCol.title = "App (bundleID)"
+        appCol.width = 270
+        autoModeTableView.addTableColumn(appCol)
+        let modeCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("am-mode"))
+        modeCol.title = "Mode"
+        modeCol.width = 130
+        autoModeTableView.addTableColumn(modeCol)
+        scroll.documentView = autoModeTableView
+        view.addSubview(scroll)
+
+        let changeBtn = NSButton(title: "Change mode…", target: self, action: #selector(autoModeChangeClicked))
+        changeBtn.bezelStyle = .rounded
+        changeBtn.frame = NSRect(x: 20, y: 46, width: 130, height: 28)
+        view.addSubview(changeBtn)
+
+        let removeBtn = NSButton(title: "Remove", target: self, action: #selector(autoModeRemoveClicked))
+        removeBtn.bezelStyle = .rounded
+        removeBtn.frame = NSRect(x: 158, y: 46, width: 90, height: 28)
+        view.addSubview(removeBtn)
+
+        autoModeEnabledCheckbox = NSButton(checkboxWithTitle: "Enable auto-select", target: self, action: #selector(autoModeToggleEnabled))
+        autoModeEnabledCheckbox.frame = NSRect(x: 20, y: 14, width: 200, height: 22)
+        view.addSubview(autoModeEnabledCheckbox)
+
+        let noMatchHint = NSTextField(labelWithString: "No match → current mode (last-used).")
+        noMatchHint.textColor = .secondaryLabelColor
+        noMatchHint.font = NSFont.systemFont(ofSize: 11)
+        noMatchHint.frame = NSRect(x: 230, y: 16, width: 220, height: 16)
+        view.addSubview(noMatchHint)
+
+        reloadAutoModeRows()
+
+        tab.view = view
+        tabView.addTabViewItem(tab)
+    }
+
+    /// Rebuild autoModeRows from Config, sorted by resolved app name.
+    private func reloadAutoModeRows() {
+        let cfg = Config.load()
+        let overrides = cfg?.appModeOverrides ?? [:]
+        autoModeRows = overrides.map { (bundleID: $0.key, modeId: $0.value) }
+            .sorted { autoModeAppDisplayName($0.bundleID) < autoModeAppDisplayName($1.bundleID) }
+        autoModeEnabledCheckbox?.state = (cfg?.autoSelectModeEnabled ?? true) ? .on : .off
+        autoModeTableView?.reloadData()
+    }
+
+    /// Best-effort display name for a bundleID. Falls back to the bundleID itself.
+    private func autoModeAppDisplayName(_ bundleID: String) -> String {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+           let bundle = Bundle(url: url) {
+            if let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, !name.isEmpty {
+                return name
+            }
+            if let name = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String, !name.isEmpty {
+                return name
+            }
+        }
+        return bundleID
+    }
+
+    private func autoModeName(forId id: String) -> String {
+        return ModeManager.shared.modes.first(where: { $0.id == id })?.name ?? id
+    }
+
+    /// Apply a mutation to Config.appModeOverrides or autoSelectModeEnabled, then persist.
+    private func mutateAutoModeConfig(_ block: (inout Config) -> Void) {
+        guard var cfg = Config.load() else { return }
+        block(&cfg)
+        cfg.save()
+        currentConfig = cfg   // keep saveClicked coherent with our live edits
+        reloadAutoModeRows()
+    }
+
+    @objc private func autoModeAddAppClicked() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose an app"
+        panel.message = "Pick the .app bundle you want to auto-select a mode for."
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let bundle = Bundle(url: url),
+              let bundleID = bundle.bundleIdentifier else {
+            let alert = NSAlert()
+            alert.messageText = "Could not read bundle identifier"
+            alert.informativeText = "Pick a valid .app."
+            alert.runModal()
+            return
+        }
+        // Pick a mode for this bundleID
+        guard let modeId = autoModePickMode(title: "Mode for \(autoModeAppDisplayName(bundleID))",
+                                            current: nil) else { return }
+        mutateAutoModeConfig { cfg in
+            cfg.appModeOverrides[bundleID] = modeId
+        }
+    }
+
+    @objc private func autoModeChangeClicked() {
+        let row = autoModeTableView.selectedRow
+        guard row >= 0 && row < autoModeRows.count else { return }
+        let (bundleID, current) = autoModeRows[row]
+        guard let modeId = autoModePickMode(title: "Mode for \(autoModeAppDisplayName(bundleID))",
+                                            current: current) else { return }
+        mutateAutoModeConfig { cfg in
+            cfg.appModeOverrides[bundleID] = modeId
+        }
+    }
+
+    @objc private func autoModeRemoveClicked() {
+        let row = autoModeTableView.selectedRow
+        guard row >= 0 && row < autoModeRows.count else { return }
+        let (bundleID, _) = autoModeRows[row]
+        mutateAutoModeConfig { cfg in
+            cfg.appModeOverrides.removeValue(forKey: bundleID)
+        }
+    }
+
+    @objc private func autoModeToggleEnabled() {
+        let on = autoModeEnabledCheckbox.state == .on
+        mutateAutoModeConfig { cfg in
+            cfg.autoSelectModeEnabled = on
+        }
+    }
+
+    /// Modal alert with a popup of available modes. Returns picked mode id or nil if cancelled.
+    private func autoModePickMode(title: String, current: String?) -> String? {
+        let modes = ModeManager.shared.modes.filter { ModeManager.shared.isModeAvailable($0) }
+        guard !modes.isEmpty else { return nil }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = "Pick the processing mode to apply in this app."
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 240, height: 26))
+        for mode in modes {
+            popup.addItem(withTitle: mode.name)
+            popup.lastItem?.representedObject = mode.id
+        }
+        if let current = current, let idx = modes.firstIndex(where: { $0.id == current }) {
+            popup.selectItem(at: idx)
+        }
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return popup.selectedItem?.representedObject as? String
+    }
+
     // MARK: - Projects tab
 
     private var projectsTableView: NSTableView!
@@ -1313,12 +1500,39 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
     // MARK: NSTableViewDataSource / Delegate (projects table)
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        guard tableView === projectsTableView else { return 0 }
-        return ProjectStore.shared.all.count
+        if tableView === projectsTableView { return ProjectStore.shared.all.count }
+        if tableView === autoModeTableView { return autoModeRows.count }
+        return 0
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard tableView === projectsTableView, let col = tableColumn else { return nil }
+        guard let col = tableColumn else { return nil }
+
+        if tableView === autoModeTableView {
+            guard row < autoModeRows.count else { return nil }
+            let (bundleID, modeId) = autoModeRows[row]
+            let cell = NSTableCellView()
+            let tf = NSTextField(labelWithString: "")
+            tf.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(tf)
+            NSLayoutConstraint.activate([
+                tf.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                tf.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+            switch col.identifier.rawValue {
+            case "am-app":
+                let name = autoModeAppDisplayName(bundleID)
+                tf.stringValue = name == bundleID ? bundleID : "\(name)  (\(bundleID))"
+            case "am-mode":
+                tf.stringValue = autoModeName(forId: modeId)
+            default:
+                tf.stringValue = ""
+            }
+            return cell
+        }
+
+        guard tableView === projectsTableView else { return nil }
         let projects = ProjectStore.shared.all
         guard row < projects.count else { return nil }
         let project = projects[row]
@@ -1389,6 +1603,8 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         // Load current config
         currentConfig = Config.load()
         populateFields()
+        reloadAutoModeRows()
+        projectsTableView?.reloadData()
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -1743,7 +1959,9 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
             disabledBuiltInModeIds: builtInModeCheckboxes.compactMap { $0.value.state == .off ? $0.key : nil },
             projectTaggingEnabled: currentConfig?.projectTaggingEnabled ?? true,
             lastUsedProjectID: currentConfig?.lastUsedProjectID ?? "",
-            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-4.1-nano",
+            appModeOverrides: currentConfig?.appModeOverrides ?? [:],
+            autoSelectModeEnabled: currentConfig?.autoSelectModeEnabled ?? true,
+            processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-5.4-nano",
             skippedUpdateVersion: currentConfig?.skippedUpdateVersion ?? "",
             lastUpdateCheck: currentConfig?.lastUpdateCheck ?? 0
         )
@@ -1847,6 +2065,10 @@ struct Config {
     var projectTaggingEnabled: Bool
     var lastUsedProjectID: String  // UUID string; "" = none
 
+    // Auto-select mode by app: bundleID -> modeId
+    var appModeOverrides: [String: String]
+    var autoSelectModeEnabled: Bool
+
     // LLM model for AI processing modes
     var processingModel: String
 
@@ -1905,8 +2127,12 @@ struct Config {
         let projectTaggingEnabled = json["projectTaggingEnabled"] as? Bool ?? true
         let lastUsedProjectID = json["lastUsedProjectID"] as? String ?? ""
 
+        // Auto-select mode by app
+        let appModeOverrides = json["appModeOverrides"] as? [String: String] ?? [:]
+        let autoSelectModeEnabled = json["autoSelectModeEnabled"] as? Bool ?? true
+
         // Processing model
-        let processingModel = json["processingModel"] as? String ?? "gpt-4.1-nano"
+        let processingModel = json["processingModel"] as? String ?? "gpt-5.4-nano"
 
         // Update tracking
         let skippedUpdateVersion = json["skippedUpdateVersion"] as? String ?? ""
@@ -1928,6 +2154,8 @@ struct Config {
             disabledBuiltInModeIds: disabledBuiltInModeIds,
             projectTaggingEnabled: projectTaggingEnabled,
             lastUsedProjectID: lastUsedProjectID,
+            appModeOverrides: appModeOverrides,
+            autoSelectModeEnabled: autoSelectModeEnabled,
             processingModel: processingModel,
             skippedUpdateVersion: skippedUpdateVersion,
             lastUpdateCheck: lastUpdateCheck
@@ -1971,7 +2199,13 @@ struct Config {
         if !lastUsedProjectID.isEmpty {
             json["lastUsedProjectID"] = lastUsedProjectID
         }
-        if processingModel != "gpt-4.1-nano" {
+        if !appModeOverrides.isEmpty {
+            json["appModeOverrides"] = appModeOverrides
+        }
+        if !autoSelectModeEnabled {
+            json["autoSelectModeEnabled"] = false
+        }
+        if processingModel != "gpt-5.4-nano" {
             json["processingModel"] = processingModel
         }
         if !skippedUpdateVersion.isEmpty {
@@ -2422,17 +2656,20 @@ class TextProcessor {
     private let endpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
 
     /// Available LLM models for processing. Ordered cheapest/fastest → premium,
-    /// with legacy GPT-4o kept at the bottom for users who already rely on it.
+    /// with legacy families kept at the bottom for users who already rely on them.
     static let availableModels: [(id: String, name: String)] = [
-        ("gpt-4.1-nano", "GPT-4.1 Nano (le plus rapide et économique)"),
-        ("gpt-4.1-mini", "GPT-4.1 Mini (équilibre qualité/coût)"),
-        ("gpt-4.1", "GPT-4.1 (premium)"),
-        ("gpt-4o-mini", "GPT-4o Mini (ancien)"),
-        ("gpt-4o", "GPT-4o (ancien)")
+        ("gpt-5.4-nano", "GPT-5.4 Nano (le plus rapide et économique)"),
+        ("gpt-5.4-mini", "GPT-5.4 Mini (équilibre qualité/coût)"),
+        ("gpt-5.4", "GPT-5.4 (premium)"),
+        ("gpt-4.1-nano", "GPT-4.1 Nano (ancien, rapide)"),
+        ("gpt-4.1-mini", "GPT-4.1 Mini (ancien)"),
+        ("gpt-4.1", "GPT-4.1 (ancien)"),
+        ("gpt-4o-mini", "GPT-4o Mini (legacy)"),
+        ("gpt-4o", "GPT-4o (legacy)")
     ]
 
     private var model: String {
-        Config.load()?.processingModel ?? "gpt-4.1-nano"
+        Config.load()?.processingModel ?? "gpt-5.4-nano"
     }
 
     func process(text: String, mode: ProcessingMode, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
@@ -2474,12 +2711,19 @@ class TextProcessor {
             ["role": "user", "content": text]
         ]
 
+        // GPT-5 family requires `max_completion_tokens`; older GPT-4 family still uses `max_tokens`.
+        let tokenKey = model.hasPrefix("gpt-5") ? "max_completion_tokens" : "max_tokens"
         let body: [String: Any] = [
             "model": model,
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 2048
+            tokenKey: 2048
         ]
+
+        // Pipeline audit log: model + token param + input + prompt head — so logs tell the full story.
+        LogManager.shared.log("[TextProcessor] model=\(model) tokenParam=\(tokenKey) mode=\(mode.name)")
+        LogManager.shared.log("[TextProcessor] INPUT (\(text.count) chars): \(text)")
+        LogManager.shared.log("[TextProcessor] SYSTEM PROMPT HEAD: \(effectivePrompt.prefix(240))\(effectivePrompt.count > 240 ? " …[+\(effectivePrompt.count - 240) chars]" : "")")
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else {
             completion(.failure(NSError(domain: "TextProcessor", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to serialize request"])))
@@ -2511,8 +2755,11 @@ class TextProcessor {
                    let firstChoice = choices.first,
                    let message = firstChoice["message"] as? [String: Any],
                    let content = message["content"] as? String {
-                    LogManager.shared.log("[TextProcessor] Success - processed \(text.count) -> \(content.count) chars")
-                    completion(.success(content.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let changed = trimmed != text
+                    LogManager.shared.log("[TextProcessor] SUCCESS \(text.count)→\(trimmed.count) chars  changed=\(changed)")
+                    LogManager.shared.log("[TextProcessor] OUTPUT: \(trimmed)")
+                    completion(.success(trimmed))
                 } else if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                           let error = json["error"] as? [String: Any],
                           let message = error["message"] as? String {
@@ -4391,6 +4638,7 @@ class RecordingWindow: NSObject {
     private var cancelButton: NSButton!
     private var modeSelector: ModeSelectorView!
     private var projectChip: ProjectChipView!
+    private var autoModeLabel: NSTextField!
     private var projectPicker: NSPopover?
 
     /// Called when user picks a different project (or nil = untag) for the
@@ -4417,9 +4665,9 @@ class RecordingWindow: NSObject {
     }
 
     private func setupWindow() {
-        // Create floating panel — taller to fit mode selector and project chip.
+        // Create floating panel — taller to fit mode selector, auto-mode label, and project chip.
         window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 216),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 234),
             styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -4439,36 +4687,45 @@ class RecordingWindow: NSObject {
         contentView.layer?.cornerRadius = 14
 
         // Waveform view at top (below title bar area)
-        waveformView = WaveformView(frame: NSRect(x: 16, y: 156, width: 328, height: 45))
+        waveformView = WaveformView(frame: NSRect(x: 16, y: 174, width: 328, height: 45))
         contentView.addSubview(waveformView)
 
         // Status row: dot + label + timer
-        statusDot = NSView(frame: NSRect(x: 16, y: 132, width: 10, height: 10))
+        statusDot = NSView(frame: NSRect(x: 16, y: 150, width: 10, height: 10))
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
         statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
         contentView.addSubview(statusDot)
 
         statusLabel = NSTextField(labelWithString: "Recording")
-        statusLabel.frame = NSRect(x: 32, y: 129, width: 120, height: 18)
+        statusLabel.frame = NSRect(x: 32, y: 147, width: 120, height: 18)
         statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         statusLabel.textColor = .white
         contentView.addSubview(statusLabel)
 
         timerLabel = NSTextField(labelWithString: "0:00")
-        timerLabel.frame = NSRect(x: 290, y: 129, width: 55, height: 18)
+        timerLabel.frame = NSRect(x: 290, y: 147, width: 55, height: 18)
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.6)
         timerLabel.alignment = .right
         contentView.addSubview(timerLabel)
 
         // Mode selector
-        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 88, width: 336, height: 36))
+        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 106, width: 336, height: 36))
         modeSelector.onModeChanged = { [weak self] index in
             let mode = ModeManager.shared.modes[index]
             self?.onModeChanged?(mode)
         }
         contentView.addSubview(modeSelector)
+
+        // Auto-mode reason label (muted, hidden unless auto-selection kicked in)
+        autoModeLabel = NSTextField(labelWithString: "")
+        autoModeLabel.frame = NSRect(x: 16, y: 84, width: 328, height: 16)
+        autoModeLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        autoModeLabel.textColor = NSColor.white.withAlphaComponent(0.45)
+        autoModeLabel.alignment = .center
+        autoModeLabel.isHidden = true
+        contentView.addSubview(autoModeLabel)
 
         // Project chip — between mode selector and action buttons
         projectChip = ProjectChipView(frame: NSRect(x: 12, y: 48, width: 336, height: 30))
@@ -4498,6 +4755,8 @@ class RecordingWindow: NSObject {
         recordingStartTime = Date()
         waveformView.reset()
         modeSelector.updateSelection(animated: false)
+        autoModeLabel.stringValue = ""
+        autoModeLabel.isHidden = true
         setStatus(.recording)
 
         // Position at top center of main screen
@@ -4553,6 +4812,11 @@ class RecordingWindow: NSObject {
 
     func cycleMode() {
         modeSelector.cycleMode()
+    }
+
+    /// Re-highlight the currently active mode (e.g. after auto-mode switched it externally).
+    func updateModeSelection() {
+        modeSelector?.updateSelection(animated: true)
     }
 
     private func updateWaveform() {
@@ -4612,6 +4876,19 @@ class RecordingWindow: NSObject {
 
     func setProject(_ project: Project?, reason: String, confidence: Double) {
         projectChip?.set(project: project, reason: reason, confidence: confidence)
+    }
+
+    /// Update (or clear) the "auto: Mode (App)" label below the mode selector.
+    /// Pass nil to hide it (e.g. user Shift-cycles = override).
+    func setAutoModeReason(_ reason: String?) {
+        guard let autoModeLabel = autoModeLabel else { return }
+        if let reason = reason, !reason.isEmpty {
+            autoModeLabel.stringValue = reason
+            autoModeLabel.isHidden = false
+        } else {
+            autoModeLabel.stringValue = ""
+            autoModeLabel.isHidden = true
+        }
     }
 
     private func showProjectPicker() {
@@ -5665,10 +5942,18 @@ enum TranscriptionProviderFactory {
 // MARK: - Clipboard & Paste
 
 func pasteText(_ text: String) {
-    // Copy to clipboard
+    // Copy to clipboard — dual format when markup is detected.
+    // Plain text: the markdown source (consumed by Terminal, Claude Code, editors).
+    // HTML: rendered Slack-flavored markup (consumed by Slack WYSIWYG, Notion, Gmail…).
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
-    pasteboard.setString(text, forType: .string)
+    if slackMarkupDetected(text), let html = slackMarkdownToHTML(text) {
+        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(html, forType: .html)
+        LogManager.shared.log("[Paste] wrote plain + HTML (\(html.count) chars)")
+    } else {
+        pasteboard.setString(text, forType: .string)
+    }
 
     // Simulate Cmd+V
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -5684,6 +5969,99 @@ func pasteText(_ text: String) {
         keyUp?.flags = .maskCommand
         keyUp?.post(tap: .cghidEventTap)
     }
+}
+
+/// Cheap check: does this string contain any Slack-style markup worth rendering?
+/// Returns false for plain prose to avoid burning HTML clipboard unnecessarily.
+private func slackMarkupDetected(_ s: String) -> Bool {
+    if s.contains("```") { return true }
+    if s.contains("`") { return true }
+    // Single-asterisk bold like *foo* (Slack syntax). Avoid matching isolated `*`.
+    if s.range(of: #"\*[^\s*][^*]*\*"#, options: .regularExpression) != nil { return true }
+    // Underscore italic like _foo_ — must be word-boundary to avoid snake_case hits.
+    if s.range(of: #"(^|\s)_[^\s_][^_]*_(\s|$|[.,!?;:])"#, options: .regularExpression) != nil { return true }
+    // Blockquote or bullet list line.
+    if s.range(of: #"(^|\n)(>|•|-\s)"#, options: .regularExpression) != nil { return true }
+    return false
+}
+
+/// Slack-flavored markdown → HTML. Supports: ```fenced```, `inline code`, *bold*,
+/// _italic_, >blockquote, • / - bullets, paragraph breaks.
+/// Not a general markdown parser — scoped to what our Slack mode prompt emits.
+private func slackMarkdownToHTML(_ md: String) -> String? {
+    // Step 1: pull out fenced code blocks (```...```) as placeholders so their
+    // content escapes unchanged and inner markup is not re-parsed.
+    var codeBlocks: [String] = []
+    var inlineCodes: [String] = []
+    func escapeHTML(_ s: String) -> String {
+        return s.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+    }
+    var work = md
+    // Fenced code blocks
+    while let range = work.range(of: #"```([\s\S]*?)```"#, options: .regularExpression) {
+        let matched = String(work[range])
+        let inner = String(matched.dropFirst(3).dropLast(3))
+        let escaped = escapeHTML(inner).trimmingCharacters(in: .newlines)
+        codeBlocks.append("<pre><code>\(escaped)</code></pre>")
+        work.replaceSubrange(range, with: "\u{0001}CB\(codeBlocks.count - 1)\u{0001}")
+    }
+    // Inline code
+    while let range = work.range(of: #"`([^`\n]+)`"#, options: .regularExpression) {
+        let matched = String(work[range])
+        let inner = String(matched.dropFirst().dropLast())
+        inlineCodes.append("<code>\(escapeHTML(inner))</code>")
+        work.replaceSubrange(range, with: "\u{0001}IC\(inlineCodes.count - 1)\u{0001}")
+    }
+    // Now escape the remaining content (outside code).
+    work = escapeHTML(work)
+
+    // Bold *foo* → <strong>foo</strong>
+    work = work.replacingOccurrences(of: #"\*([^\s*][^*]*?)\*"#, with: "<strong>$1</strong>", options: .regularExpression)
+    // Italic _foo_ → <em>foo</em>  (word-boundary safe)
+    work = work.replacingOccurrences(of: #"(^|\s)_([^\s_][^_]*?)_(\s|$|[.,!?;:])"#, with: "$1<em>$2</em>$3", options: .regularExpression)
+
+    // Line-based passes: blockquotes, bullets, paragraphs.
+    let lines = work.components(separatedBy: "\n")
+    var html = ""
+    var inList = false
+    var inQuote = false
+    func closeBlocks() {
+        if inList { html += "</ul>"; inList = false }
+        if inQuote { html += "</blockquote>"; inQuote = false }
+    }
+    for raw in lines {
+        let line = raw
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("&gt;") {
+            if !inQuote { closeBlocks(); html += "<blockquote>"; inQuote = true }
+            let content = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            html += content + "<br>"
+        } else if trimmed.hasPrefix("• ") || trimmed.hasPrefix("- ") {
+            if inQuote { html += "</blockquote>"; inQuote = false }
+            if !inList { html += "<ul>"; inList = true }
+            let content = String(trimmed.dropFirst(2))
+            html += "<li>\(content)</li>"
+        } else if trimmed.isEmpty {
+            closeBlocks()
+            html += "<p></p>"
+        } else {
+            closeBlocks()
+            html += "<p>\(line)</p>"
+        }
+    }
+    closeBlocks()
+
+    // Re-insert placeholders
+    for (i, block) in codeBlocks.enumerated() {
+        html = html.replacingOccurrences(of: "\u{0001}CB\(i)\u{0001}", with: block)
+    }
+    for (i, code) in inlineCodes.enumerated() {
+        html = html.replacingOccurrences(of: "\u{0001}IC\(i)\u{0001}", with: code)
+    }
+    // Wrap in minimal HTML so clipboard consumers see a valid fragment.
+    return "<html><body>\(html)</body></html>"
 }
 
 // MARK: - Auto Update
@@ -6081,6 +6459,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingProjectSource: String = "none"  // "predicted" | "manual" | "last-used" | "none"
     private var pendingProjectReason: String = ""      // What triggered the prediction — for details popover
     private var pendingProjectConfidence: Double = 0
+    private var pendingAutoModeReason: String?         // e.g. "auto: Clean (Slack)"; nil once user overrides
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Eagerly init HistoryManager so the JSONL export dir is created and the
@@ -6157,6 +6536,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Check Permissions...", action: #selector(showPermissionStatus), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
+
+        // Help submenu — links to the GitHub docs so users can find feature-specific pages.
+        let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        let helpMenu = NSMenu(title: "Help")
+        let helpLinks: [(String, String)] = [
+            ("Documentation index", "https://github.com/hugoblanc/whisper-voice/tree/main/docs"),
+            ("Modes", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/modes.md"),
+            ("Auto-mode by app", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/auto-mode.md"),
+            ("Projects", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/projects.md"),
+            ("Custom vocabulary", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/vocabulary.md"),
+            ("Pressepapier multi-format", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/clipboard.md"),
+            ("Raccourcis & Push-to-Talk", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/shortcuts.md"),
+        ]
+        for (title, url) in helpLinks {
+            let item = NSMenuItem(title: title, action: #selector(openHelpURL(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            helpMenu.addItem(item)
+        }
+        helpMenu.addItem(NSMenuItem.separator())
+        let issuesItem = NSMenuItem(title: "Report an issue…", action: #selector(openHelpURL(_:)), keyEquivalent: "")
+        issuesItem.target = self
+        issuesItem.representedObject = "https://github.com/hugoblanc/whisper-voice/issues"
+        helpMenu.addItem(issuesItem)
+        helpItem.submenu = helpMenu
+        menu.addItem(helpItem)
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Version \(UpdateChecker.currentVersion)", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
@@ -6311,7 +6717,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 disabledBuiltInModeIds: [],
                 projectTaggingEnabled: true,
                 lastUsedProjectID: "",
-                processingModel: "gpt-4.1-nano",
+                appModeOverrides: [:],
+                autoSelectModeEnabled: true,
+                processingModel: "gpt-5.4-nano",
                 skippedUpdateVersion: "",
                 lastUpdateCheck: 0
             )
@@ -6614,15 +7022,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    /// Look up bundleID in Config.appModeOverrides and switch to the mapped mode.
+    /// Stashes a human-readable reason in pendingAutoModeReason for the panel label.
+    private func applyAutoSelectMode(for ctx: DictationContext?) {
+        guard let config = Config.load(), config.autoSelectModeEnabled else { return }
+        guard let bundleID = ctx?.app?.bundleID,
+              let modeId = config.appModeOverrides[bundleID] else { return }
+        guard let mode = ModeManager.shared.modes.first(where: { $0.id == modeId }),
+              ModeManager.shared.isModeAvailable(mode) else { return }
+        ModeManager.shared.setMode(id: modeId)
+        // Critical: setupModeSwitchMonitor already snapshotted the *previous* mode into
+        // selectedModeForCurrentRecording (captureNow is async). Update it so the finalize
+        // step uses the auto-selected mode, not the stale pre-switch one.
+        selectedModeForCurrentRecording = mode
+        recordingWindow?.updateModeSelection()
+        let appName = ctx?.app?.name ?? bundleID
+        pendingAutoModeReason = "auto: \(mode.name) (\(appName))"
+        recordingWindow?.setAutoModeReason(pendingAutoModeReason)
+        LogManager.shared.log("[AutoMode] bundleID=\(bundleID) → \(mode.name) (locked as recording mode)")
+    }
+
     private func startRecording(showStopMessage: Bool) {
         LogManager.shared.log("Starting recording (showStopMessage: \(showStopMessage))")
 
         // Capture dictation context (app, window, URL or terminal cwd/git) before audio starts.
         // Runs off-main; completion arrives asynchronously and attaches to pending entry.
         pendingDictationContext = nil
+        pendingAutoModeReason = nil
         ContextCapturer.shared.captureNow { [weak self] ctx in
             guard let self = self else { return }
             self.pendingDictationContext = ctx
+            // Auto-select mode based on bundleID → modeId mapping.
+            self.applyAutoSelectMode(for: ctx)
             // Predict project from the captured context + history.
             let prediction = ProjectPredictor.predict(ctx: ctx)
             self.pendingProject = prediction.project
@@ -6890,6 +7321,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     if self?.state == .recording {
                         self?.recordingWindow?.cycleMode()
                         self?.selectedModeForCurrentRecording = ModeManager.shared.currentMode
+                        self?.pendingAutoModeReason = nil
+                        self?.recordingWindow?.setAutoModeReason(nil)
                         LogManager.shared.log("Mode switched to: \(ModeManager.shared.currentMode.name)")
                     }
                 }
@@ -6903,6 +7336,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     if self?.state == .recording {
                         self?.recordingWindow?.cycleMode()
                         self?.selectedModeForCurrentRecording = ModeManager.shared.currentMode
+                        self?.pendingAutoModeReason = nil
+                        self?.recordingWindow?.setAutoModeReason(nil)
                         LogManager.shared.log("Mode switched to: \(ModeManager.shared.currentMode.name)")
                     }
                 }
@@ -7092,6 +7527,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func openHelpURL(_ sender: NSMenuItem) {
+        guard let urlString = sender.representedObject as? String,
+              let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
