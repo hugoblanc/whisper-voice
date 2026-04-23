@@ -2673,10 +2673,16 @@ class TextProcessor {
     }
 
     func process(text: String, mode: ProcessingMode, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
-        process(text: text, mode: mode, context: nil, apiKey: apiKey, completion: completion)
+        process(text: text, mode: mode, context: nil, dictationContext: nil, vocabulary: nil, apiKey: apiKey, completion: completion)
     }
 
-    func process(text: String, mode: ProcessingMode, context: String?, apiKey: String, completion: @escaping (Result<String, Error>) -> Void) {
+    func process(text: String,
+                 mode: ProcessingMode,
+                 context: String?,
+                 dictationContext: DictationContext? = nil,
+                 vocabulary: [String]? = nil,
+                 apiKey: String,
+                 completion: @escaping (Result<String, Error>) -> Void) {
         guard let systemPrompt = mode.systemPrompt else {
             // No processing needed
             completion(.success(text))
@@ -2686,7 +2692,7 @@ class TextProcessor {
         LogManager.shared.log("[TextProcessor] Processing with mode: \(mode.name)")
 
         // Build system prompt - for Super mode with context, use dynamic prompt
-        let effectivePrompt: String
+        var effectivePrompt: String
         if mode.id == "super", let context = context, !context.isEmpty {
             effectivePrompt = """
             Tu es un assistant intelligent. L'utilisateur a sélectionné le texte suivant :
@@ -2704,6 +2710,33 @@ class TextProcessor {
             """
         } else {
             effectivePrompt = systemPrompt
+        }
+
+        // Super mode: append ambient context (app, git repo, URL, cwd) so the
+        // assistant can act like a real co-pilot instead of a plain reformatter.
+        if mode.id == "super", let ctx = dictationContext {
+            var lines: [String] = []
+            if let app = ctx.app { lines.append("- Active app: \(app.name) (\(app.bundleID))") }
+            if let t = ctx.signals?.windowTitle, !t.isEmpty { lines.append("- Window title: \(t)") }
+            if let url = ctx.signals?.browserURL, !url.isEmpty { lines.append("- Browser URL: \(url)") }
+            if let tab = ctx.signals?.browserTabTitle, !tab.isEmpty { lines.append("- Browser tab: \(tab)") }
+            if let cwd = ctx.signals?.cwd, !cwd.isEmpty { lines.append("- Terminal cwd: \(cwd)") }
+            if let cmd = ctx.signals?.foregroundCmd, !cmd.isEmpty { lines.append("- Foreground command: \(cmd)") }
+            if let git = ctx.signals?.gitRemote, !git.isEmpty {
+                var g = git
+                if let b = ctx.signals?.gitBranch, !b.isEmpty { g += " @ \(b)" }
+                lines.append("- Git: \(g)")
+            }
+            if !lines.isEmpty {
+                effectivePrompt += "\n\nContexte ambient au moment de la dictée (tu peux t'en servir si pertinent) :\n" + lines.joined(separator: "\n")
+            }
+        }
+
+        // Custom vocabulary: tell the LLM to preserve these spellings verbatim,
+        // even if Whisper got them phonetically wrong. Same list as the Whisper
+        // prompt, but at the LLM layer so reformatting modes don't "correct" them.
+        if let vocab = vocabulary, !vocab.isEmpty {
+            effectivePrompt += "\n\nTermes à préserver exactement (restaure l'orthographe d'origine si elle a été déformée) : " + vocab.joined(separator: ", ") + "."
         }
 
         let messages: [[String: String]] = [
@@ -7168,7 +7201,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         }
 
                         // Process with GPT
-                        TextProcessor.shared.process(text: text, mode: mode, context: self?.capturedContext, apiKey: apiKey) { processResult in
+                        TextProcessor.shared.process(
+                            text: text,
+                            mode: mode,
+                            context: self?.capturedContext,
+                            dictationContext: self?.pendingDictationContext,
+                            vocabulary: self?.config?.customVocabulary,
+                            apiKey: apiKey
+                        ) { processResult in
                             DispatchQueue.main.async {
                                 switch processResult {
                                 case .success(let processedText):
