@@ -641,17 +641,17 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         setupProjectsTab()
         setupLogsTab()
 
-        // Bottom buttons
-        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
-        cancelButton.bezelStyle = .rounded
-        cancelButton.frame = NSRect(x: 310, y: 10, width: 80, height: 32)
-        contentView.addSubview(cancelButton)
-
+        // Bottom buttons — aligned to window right edge, widths fit full labels.
         let saveButton = NSButton(title: "Save & Apply", target: self, action: #selector(saveClicked))
         saveButton.bezelStyle = .rounded
-        saveButton.frame = NSRect(x: 400, y: 10, width: 90, height: 32)
+        saveButton.frame = NSRect(x: 370, y: 10, width: 120, height: 32)
         saveButton.keyEquivalent = "\r"
         contentView.addSubview(saveButton)
+
+        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
+        cancelButton.bezelStyle = .rounded
+        cancelButton.frame = NSRect(x: 280, y: 10, width: 80, height: 32)
+        contentView.addSubview(cancelButton)
     }
 
     private func setupGeneralTab() {
@@ -1172,18 +1172,18 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         titleLabel.frame = NSRect(x: 20, y: 350, width: 300, height: 20)
         view.addSubview(titleLabel)
 
-        let hint = NSTextField(labelWithString: "Pick an app, pick a mode. When you dictate in that app, the mode switches automatically.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.frame = NSRect(x: 20, y: 330, width: 420, height: 16)
-        view.addSubview(hint)
-
         let addButton = NSButton(title: "+ Add app", target: self, action: #selector(autoModeAddAppClicked))
         addButton.bezelStyle = .rounded
-        addButton.frame = NSRect(x: 340, y: 345, width: 100, height: 26)
+        addButton.frame = NSRect(x: 340, y: 346, width: 100, height: 26)
         view.addSubview(addButton)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 80, width: 420, height: 240))
+        let hint = NSTextField(wrappingLabelWithString: "Pick an app, pick a mode. When you dictate in that app, the mode switches automatically.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = NSFont.systemFont(ofSize: 11)
+        hint.frame = NSRect(x: 20, y: 324, width: 420, height: 18)
+        view.addSubview(hint)
+
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 80, width: 420, height: 235))
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
         autoModeTableView = NSTableView()
@@ -1350,23 +1350,24 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
 
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 380))
 
+        // Top row: title + Add button on the right — width reserved for the button so text never overlaps.
         let titleLabel = NSTextField(labelWithString: "Projects")
         titleLabel.font = NSFont.boldSystemFont(ofSize: 13)
-        titleLabel.frame = NSRect(x: 20, y: 350, width: 300, height: 20)
+        titleLabel.frame = NSRect(x: 20, y: 350, width: 280, height: 20)
         view.addSubview(titleLabel)
-
-        let hint = NSTextField(labelWithString: "Created projects can be assigned during recording or retroactively from the History viewer.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.frame = NSRect(x: 20, y: 330, width: 420, height: 16)
-        view.addSubview(hint)
 
         let addButton = NSButton(title: "+ New project", target: self, action: #selector(newProjectClicked))
         addButton.bezelStyle = .rounded
-        addButton.frame = NSRect(x: 320, y: 345, width: 120, height: 26)
+        addButton.frame = NSRect(x: 320, y: 346, width: 120, height: 26)
         view.addSubview(addButton)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 50, width: 420, height: 270))
+        let hint = NSTextField(wrappingLabelWithString: "Created projects can be assigned during recording or retroactively from the History viewer.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = NSFont.systemFont(ofSize: 11)
+        hint.frame = NSRect(x: 20, y: 324, width: 420, height: 18)
+        view.addSubview(hint)
+
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 50, width: 420, height: 265))
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
         projectsTableView = NSTableView()
@@ -1396,17 +1397,17 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
 
         let archiveBtn = NSButton(title: "Archive / Restore", target: self, action: #selector(toggleArchiveSelectedProject))
         archiveBtn.bezelStyle = .rounded
-        archiveBtn.frame = NSRect(x: 108, y: 12, width: 130, height: 28)
+        archiveBtn.frame = NSRect(x: 104, y: 12, width: 130, height: 28)
         view.addSubview(archiveBtn)
 
-        let untagAllBtn = NSButton(title: "Untag all entries", target: self, action: #selector(untagAllForSelectedProject))
+        let untagAllBtn = NSButton(title: "Untag all", target: self, action: #selector(untagAllForSelectedProject))
         untagAllBtn.bezelStyle = .rounded
-        untagAllBtn.frame = NSRect(x: 244, y: 12, width: 130, height: 28)
+        untagAllBtn.frame = NSRect(x: 238, y: 12, width: 90, height: 28)
         view.addSubview(untagAllBtn)
 
         let deleteBtn = NSButton(title: "Delete", target: self, action: #selector(deleteSelectedProject))
         deleteBtn.bezelStyle = .rounded
-        deleteBtn.frame = NSRect(x: 380, y: 12, width: 60, height: 28)
+        deleteBtn.frame = NSRect(x: 360, y: 12, width: 80, height: 28)
         view.addSubview(deleteBtn)
 
         tab.view = view
@@ -1563,22 +1564,24 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
         let logsTab = NSTabViewItem(identifier: "logs")
         logsTab.label = "Logs"
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 300))
+        // Matches the 380px height of the other tabs — previously 300 which
+        // created a weird gap at the top of the tab content area.
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 380))
 
         // Clear logs button
         let clearButton = NSButton(title: "Clear Logs", target: self, action: #selector(clearLogsClicked))
         clearButton.bezelStyle = .rounded
-        clearButton.frame = NSRect(x: 20, y: 265, width: 100, height: 26)
+        clearButton.frame = NSRect(x: 20, y: 346, width: 100, height: 26)
         view.addSubview(clearButton)
 
         // Auto-scroll checkbox
         autoScrollCheckbox = NSButton(checkboxWithTitle: "Auto-scroll", target: nil, action: nil)
-        autoScrollCheckbox.frame = NSRect(x: 350, y: 265, width: 100, height: 26)
+        autoScrollCheckbox.frame = NSRect(x: 350, y: 346, width: 100, height: 26)
         autoScrollCheckbox.state = .on
         view.addSubview(autoScrollCheckbox)
 
         // Logs scroll view
-        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 10, width: 420, height: 250))
+        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 10, width: 420, height: 330))
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -3991,6 +3994,11 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
     private var tableView: NSTableView!
     private var entries: [TranscriptionEntry] = []
     private var filteredEntries: [TranscriptionEntry] = []
+    // Held refs for windowDidResize-based manual layout
+    private var scrollView: NSScrollView!
+    private var copyButton: NSButton!
+    private var deleteButton: NSButton!
+    private var clearButton: NSButton!
 
     override init() {
         super.init()
@@ -4025,12 +4033,11 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         contentView.addSubview(projectFilterPopup)
         reloadProjectFilterPopup()
 
-        // Table view with scroll
-        let scrollView = NSScrollView(frame: NSRect(x: 16, y: 50, width: 568, height: 350))
+        // Table view with scroll — frames recomputed in layoutSubviewsForSize on resize.
+        scrollView = NSScrollView(frame: NSRect(x: 16, y: 50, width: 568, height: 350))
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
-        scrollView.autoresizingMask = [.width, .height]
 
         tableView = NSTableView()
         tableView.delegate = self
@@ -4075,20 +4082,48 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
         tableView.menu = menu
 
         // Buttons
-        let copyButton = NSButton(title: "Copy", target: self, action: #selector(copySelectedEntry))
+        copyButton = NSButton(title: "Copy", target: self, action: #selector(copySelectedEntry))
         copyButton.bezelStyle = .rounded
         copyButton.frame = NSRect(x: 16, y: 12, width: 80, height: 28)
         contentView.addSubview(copyButton)
 
-        let deleteButton = NSButton(title: "Delete", target: self, action: #selector(deleteSelectedEntry))
+        deleteButton = NSButton(title: "Delete", target: self, action: #selector(deleteSelectedEntry))
         deleteButton.bezelStyle = .rounded
         deleteButton.frame = NSRect(x: 104, y: 12, width: 80, height: 28)
         contentView.addSubview(deleteButton)
 
-        let clearButton = NSButton(title: "Clear All", target: self, action: #selector(clearAllHistory))
+        clearButton = NSButton(title: "Clear All", target: self, action: #selector(clearAllHistory))
         clearButton.bezelStyle = .rounded
         clearButton.frame = NSRect(x: 504, y: 12, width: 80, height: 28)
         contentView.addSubview(clearButton)
+
+        // Initial layout pass + resize observer
+        layoutSubviewsForSize(window.contentView!.bounds.size)
+    }
+
+    /// Manual layout — reproducible and simpler than autoresizingMask juggling
+    /// with two top-row controls. Invoked on window resize and once at setup.
+    private func layoutSubviewsForSize(_ size: NSSize) {
+        let margin: CGFloat = 16
+        let topY = size.height - 12 - 28          // top row 12px below window top
+        let popupW: CGFloat = 200
+        let searchW = max(120, size.width - margin * 3 - popupW)
+        searchField.frame = NSRect(x: margin, y: topY, width: searchW, height: 28)
+        projectFilterPopup.frame = NSRect(x: margin + searchW + margin, y: topY, width: popupW, height: 28)
+
+        let tableTop = topY - 8                    // scrollview ends 8px below top row
+        let tableBottomY: CGFloat = 50
+        scrollView.frame = NSRect(x: margin, y: tableBottomY, width: size.width - margin * 2, height: tableTop - tableBottomY)
+
+        copyButton.frame = NSRect(x: margin, y: 12, width: 80, height: 28)
+        deleteButton.frame = NSRect(x: margin + 88, y: 12, width: 80, height: 28)
+        clearButton.frame = NSRect(x: size.width - margin - 80, y: 12, width: 80, height: 28)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        if let contentView = window.contentView {
+            layoutSubviewsForSize(contentView.bounds.size)
+        }
     }
 
     func show() {
@@ -4464,18 +4499,45 @@ class HistoryWindow: NSObject, NSWindowDelegate, NSTableViewDelegate, NSTableVie
     }
 
     @objc private func clearAllHistory() {
+        let count = entries.count
+        if count == 0 { return }
+
+        // Scary confirmation — users should almost never want to nuke the whole
+        // history. Single entries can be removed via Delete / right-click.
         let alert = NSAlert()
-        alert.messageText = "Clear All History?"
-        alert.informativeText = "This will permanently delete all transcription history. This cannot be undone."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Clear All")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = "⚠️ Delete ALL \(count) transcription\(count == 1 ? "" : "s")?"
+        alert.informativeText = """
+            Cette action supprime définitivement toutes tes dictées, leur contexte (projet, app, git, URL), et les exports JSONL associés. Irréversible, aucun backup.
+
+            Pour supprimer une entrée seule, ferme cette fenêtre puis utilise Delete ou le menu clic-droit → Delete.
+
+            Tape DELETE ci-dessous pour confirmer.
+            """
+        alert.alertStyle = .critical
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.placeholderString = "DELETE"
+        alert.accessoryView = input
+
+        let cancelButton = alert.addButton(withTitle: "Cancel")          // First = default = Cancel
+        let deleteButton = alert.addButton(withTitle: "Delete everything") // Destructive
+        deleteButton.hasDestructiveAction = true
+        alert.window.initialFirstResponder = input
+        _ = cancelButton  // silence unused
 
         let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            HistoryManager.shared.clearHistory()
-            reloadData()
+        guard response == .alertSecondButtonReturn else { return }
+        guard input.stringValue.trimmingCharacters(in: .whitespaces) == "DELETE" else {
+            let err = NSAlert()
+            err.messageText = "Confirmation failed"
+            err.informativeText = "Tu dois taper DELETE exactement (majuscules). Rien n'a été supprimé."
+            err.alertStyle = .warning
+            err.addButton(withTitle: "OK")
+            err.runModal()
+            return
         }
+        HistoryManager.shared.clearHistory()
+        reloadData()
     }
 }
 
@@ -6495,6 +6557,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingAutoModeReason: String?         // e.g. "auto: Clean (Slack)"; nil once user overrides
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Install a proper main menu so text fields get standard editing
+        // shortcuts (Cmd+C/V/A/Z) and the app menu bar looks native when any
+        // of our windows becomes key. LSUIElement=true means the menu bar is
+        // hidden by default, but Cocoa still needs the menu installed to route
+        // the editing commands through NSResponder.
+        NSApp.mainMenu = buildMainMenu()
+
         // Eagerly init HistoryManager so the JSONL export dir is created and the
         // one-time migration from history.json runs on first launch after update.
         _ = HistoryManager.shared
@@ -6508,6 +6577,88 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             showConfigError()
         }
+    }
+
+    /// Build the standard macOS main menu: App / Edit / Window / Help.
+    /// Without this, Cmd+C/V/A/Z don't work in text fields because Cocoa
+    /// wires those selectors through the main menu responder chain.
+    private func buildMainMenu() -> NSMenu {
+        let main = NSMenu()
+
+        // ── App menu (shows as "Whisper Voice")
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu(title: "Whisper Voice")
+        appMenu.addItem(NSMenuItem(title: "About Whisper Voice", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ","))
+        appMenu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
+        appMenu.addItem(.separator())
+        let hide = NSMenuItem(title: "Hide Whisper Voice", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(hide)
+        let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Quit Whisper Voice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        // ── Edit menu (critical for text field editing shortcuts)
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
+        let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redo)
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: ""))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editItem.submenu = editMenu
+        main.addItem(editItem)
+
+        // ── Window menu
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""))
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(NSMenuItem(title: "History…", action: #selector(showHistory), keyEquivalent: "h"))
+        windowItem.submenu = windowMenu
+        NSApp.windowsMenu = windowMenu
+        main.addItem(windowItem)
+
+        // ── Help menu (same links as the status-bar Help submenu)
+        let helpItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        let helpLinks: [(String, String)] = [
+            ("Documentation", "https://github.com/hugoblanc/whisper-voice/tree/main/docs"),
+            ("Modes", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/modes.md"),
+            ("Auto-mode by app", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/auto-mode.md"),
+            ("Projects", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/projects.md"),
+            ("Custom vocabulary", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/vocabulary.md"),
+            ("Pressepapier multi-format", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/clipboard.md"),
+            ("Raccourcis & Push-to-Talk", "https://github.com/hugoblanc/whisper-voice/blob/main/docs/shortcuts.md"),
+        ]
+        for (title, url) in helpLinks {
+            let item = NSMenuItem(title: title, action: #selector(openHelpURL(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            helpMenu.addItem(item)
+        }
+        helpMenu.addItem(.separator())
+        let issues = NSMenuItem(title: "Report an Issue…", action: #selector(openHelpURL(_:)), keyEquivalent: "")
+        issues.target = self
+        issues.representedObject = "https://github.com/hugoblanc/whisper-voice/issues"
+        helpMenu.addItem(issues)
+        helpItem.submenu = helpMenu
+        NSApp.helpMenu = helpMenu
+        main.addItem(helpItem)
+
+        return main
     }
 
     private func checkPermissionsAndSetup() {
