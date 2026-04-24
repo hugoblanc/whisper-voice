@@ -21,3 +21,4 @@ icons/AppIcon.iconset/
 *.swo
 *~
 WhisperVoice/Resources/whisper-server
+*.mov

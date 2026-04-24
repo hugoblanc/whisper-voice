@@ -535,18 +535,34 @@
   .hist-text { flex: 1; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hist-proj { color: var(--accent-2); font-weight: 500; margin-left: 10px; }
 
-  /* ─── Demo slot (for your GIF/MP4) ───────────────────────── */
-  .demo-slot {
-    margin-top: 80px;
-    padding: 40px;
-    border: 1px dashed var(--border-2);
+  /* ─── Real demo video section ────────────────────────────── */
+  #demo { padding-top: 0; }
+  .demo-frame {
+    position: relative;
     border-radius: var(--radius-lg);
-    background: var(--surface);
-    text-align: center;
-    color: var(--text-faint);
-    font-size: 14px;
+    overflow: hidden;
+    background: #0a0a10;
+    border: 1px solid var(--border-2);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 40px 80px -24px rgba(0, 0, 0, 0.8),
+      0 0 120px -40px rgba(255, 106, 58, 0.25);
+    line-height: 0;
   }
-  .demo-slot strong { color: var(--text); display: block; margin-bottom: 6px; }
+  .demo-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-lg);
+  }
+  .demo-frame video {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
 
   /* ─── Section headers ────────────────────────────────────── */
   .section-label {
@@ -993,10 +1009,27 @@
 
       </div>
 
-      <!-- Demo video slot -->
-      <div class="demo-slot">
-        <strong>📼 Demo video goes here</strong>
-        Drop an 8-12s MP4/WebM of Slack → Option+Space → speaking → clean text appearing in live. Record with QuickTime, trim in Gifski or ScreenStudio. Replace this block with a &lt;video&gt; tag pointing to /docs/demo.mp4 (autoplay, loop, muted, playsinline).
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- SEE IT IN ACTION — real demo video -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="demo">
+    <div class="wrap">
+      <div class="section-label">See it in action</div>
+      <h2 class="section-title">12 seconds. Slack. No tricks.</h2>
+      <p class="section-sub">Real dictation in Slack. Watch the auto-mode detect the app, the panel float in, the waveform breathe with my voice, and the text paste back with inline-code rendering — the kind of thing you'd normally need to manually toggle Slack's markup setting for.</p>
+
+      <div class="demo-frame">
+        <video
+          autoplay muted loop playsinline preload="metadata"
+          poster="demo-poster.jpg"
+          aria-label="A dictation recorded in Slack using Whisper Voice">
+          <source src="demo.mp4" type="video/mp4" />
+          Your browser doesn't support embedded video.
+          <a href="demo.mp4">Download the demo</a>.
+        </video>
       </div>
     </div>
   </section>
