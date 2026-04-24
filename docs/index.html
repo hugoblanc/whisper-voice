@@ -1,539 +1,1292 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Whisper Voice - Voice to Text for Mac & Windows</title>
-    <meta name="description" content="Speak, and text appears at your cursor. Native voice transcription app for macOS and Windows using AI.">
-    <meta name="keywords" content="voice to text, speech recognition, transcription, macOS, Windows, OpenAI, Mistral, Whisper">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Whisper Voice — Dictate anywhere on your Mac</title>
+<meta name="description" content="Press a shortcut, speak, polished text appears at your cursor. Open-source voice-to-text for macOS. Free forever, BYOK, 100% local option." />
+<meta name="keywords" content="voice to text, dictation, transcription, macOS, Whisper, OpenAI, Mistral, open source, Superwhisper alternative" />
 
-    <!-- Open Graph -->
-    <meta property="og:title" content="Whisper Voice - Voice to Text">
-    <meta property="og:description" content="Speak, and text appears at your cursor. Native voice transcription for Mac & Windows.">
-    <meta property="og:image" content="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png">
-    <meta property="og:url" content="https://hugoblanc.github.io/whisper-voice/">
-    <meta property="og:type" content="website">
+<meta property="og:title" content="Whisper Voice — Dictate anywhere on your Mac" />
+<meta property="og:description" content="Press a shortcut, speak, polished text appears at your cursor. Open-source. Free forever." />
+<meta property="og:image" content="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png" />
+<meta property="og:url" content="https://hugoblanc.github.io/whisper-voice/" />
+<meta property="og:type" content="website" />
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Whisper Voice - Voice to Text">
-    <meta name="twitter:description" content="Speak, and text appears at your cursor.">
-    <meta name="twitter:image" content="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png">
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Whisper Voice — Open-source voice-to-text for macOS" />
+<meta name="twitter:description" content="Press a shortcut, speak, polished text appears at your cursor." />
+<meta name="twitter:image" content="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png" />
 
-    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png">
+<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png" />
 
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-        :root {
-            --bg-dark: #0a0a0f;
-            --bg-card: #12121a;
-            --blue-neon: #00b4ff;
-            --blue-glow: rgba(0, 180, 255, 0.4);
-            --orange: #ff6b35;
-            --orange-glow: rgba(255, 107, 53, 0.4);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0b0;
-            --border-color: #2a2a3a;
-        }
+<style>
+  :root {
+    --bg:          #09080c;
+    --bg-2:        #0e0d14;
+    --surface:     rgba(255, 255, 255, 0.04);
+    --surface-2:   rgba(255, 255, 255, 0.08);
+    --border:      rgba(255, 255, 255, 0.09);
+    --border-2:    rgba(255, 255, 255, 0.14);
+    --text:        #f4ecde;
+    --text-dim:    rgba(244, 236, 222, 0.62);
+    --text-faint:  rgba(244, 236, 222, 0.38);
+    --accent:      #ff6a3a;
+    --accent-2:    #ff8d5a;
+    --accent-soft: rgba(255, 106, 58, 0.15);
+    --radius-sm:   10px;
+    --radius-md:   16px;
+    --radius-lg:   24px;
+    --ease:        cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        /* Glow background effect */
-        .bg-glow {
-            position: fixed;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle at 30% 20%, rgba(0, 180, 255, 0.08) 0%, transparent 40%),
-                        radial-gradient(circle at 70% 60%, rgba(255, 107, 53, 0.05) 0%, transparent 40%);
-            pointer-events: none;
-            z-index: -1;
-        }
+  html { scroll-behavior: smooth; }
 
-        .container {
-            max-width: 1100px;
-            margin: 0 auto;
-            padding: 0 24px;
-        }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
 
-        /* Hero Section */
-        .hero {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            padding: 60px 24px;
-            position: relative;
-        }
+  /* Ambient light behind the page — warm radial gradients */
+  .ambient {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(900px 600px at 15% 5%,  rgba(255, 106, 58, 0.15), transparent 55%),
+      radial-gradient(800px 500px at 90% 20%, rgba(255, 140, 90, 0.08), transparent 60%),
+      radial-gradient(600px 400px at 50% 90%, rgba(255, 106, 58, 0.06), transparent 65%);
+  }
 
-        /* Scroll indicator */
-        .scroll-indicator {
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            cursor: pointer;
-            opacity: 0.4;
-            transition: opacity 0.3s ease;
-        }
+  /* Subtle film grain for texture */
+  .grain {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/></svg>");
+  }
 
-        .scroll-indicator:hover {
-            opacity: 0.8;
-        }
+  main { position: relative; z-index: 2; }
 
-        .scroll-indicator svg {
-            width: 32px;
-            height: 32px;
-            color: var(--text-secondary);
-            animation: bounce 2s ease-in-out infinite;
-        }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
 
-        @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(8px); }
-        }
+  /* ─── Navigation ─────────────────────────────────────────── */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    background: rgba(9, 8, 12, 0.72);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 14px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .brand-mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent) 0%, #d85430 100%);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 20px -6px var(--accent);
+  }
+  .brand-mark svg { width: 14px; height: 14px; fill: #fff; }
+  .nav-links { display: flex; align-items: center; gap: 28px; font-size: 14px; }
+  .nav-links a {
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: color 160ms var(--ease);
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-btn {
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    color: var(--text) !important;
+    font-weight: 500;
+  }
 
-        .logo {
-            width: 140px;
-            height: 140px;
-            margin-bottom: 32px;
-            border-radius: 28px;
-            box-shadow: 0 0 60px var(--blue-glow), 0 0 120px rgba(0, 180, 255, 0.2);
-            animation: float 6s ease-in-out infinite;
-        }
+  /* ─── Hero ──────────────────────────────────────────────── */
+  section { padding: 96px 0; }
 
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
+  #hero { padding: 72px 0 120px; }
 
-        .hero h1 {
-            font-size: clamp(2.5rem, 6vw, 4rem);
-            font-weight: 700;
-            margin-bottom: 16px;
-            background: linear-gradient(135deg, var(--text-primary) 0%, var(--blue-neon) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px 6px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: 999px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    margin-bottom: 28px;
+  }
+  .badge .dot {
+    width: 16px; height: 16px;
+    border-radius: 999px;
+    background: var(--accent);
+    display: grid; place-items: center;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .badge strong { color: var(--text); font-weight: 500; }
 
-        .hero .tagline {
-            font-size: clamp(1.1rem, 2.5vw, 1.4rem);
-            color: var(--text-secondary);
-            max-width: 500px;
-            margin-bottom: 48px;
-        }
+  h1.display {
+    font-family: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(46px, 7vw, 92px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    margin-bottom: 22px;
+    max-width: 900px;
+  }
+  h1.display em {
+    font-style: italic;
+    color: var(--accent);
+  }
 
-        .hero .tagline strong {
-            color: var(--blue-neon);
-        }
+  .hero-sub {
+    font-size: clamp(17px, 1.4vw, 19px);
+    color: var(--text-dim);
+    max-width: 620px;
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
 
-        /* CTA Buttons */
-        .cta-group {
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
+  .value-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 36px;
+  }
+  .value-chip {
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .value-chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
 
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            padding: 16px 32px;
-            border-radius: 12px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            border: none;
-        }
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 64px;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 22px;
+    border-radius: 12px;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 15px;
+    transition: all 180ms var(--ease);
+    border: 1px solid transparent;
+  }
+  .btn-primary {
+    background: linear-gradient(180deg, #ff7a4a 0%, #e85a2a 100%);
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      0 10px 30px -10px rgba(255, 106, 58, 0.6),
+      0 0 0 1px rgba(255, 106, 58, 0.3);
+  }
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.32),
+      0 16px 36px -10px rgba(255, 106, 58, 0.75),
+      0 0 0 1px rgba(255, 106, 58, 0.4);
+  }
+  .btn-ghost {
+    background: var(--surface-2);
+    color: var(--text);
+    border-color: var(--border-2);
+  }
+  .btn-ghost:hover { background: var(--surface); border-color: rgba(255, 255, 255, 0.2); }
+  .btn small {
+    display: block;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 400;
+    margin-top: 1px;
+  }
+  .btn-ghost small { color: var(--text-faint); }
 
-        .btn-primary {
-            background: linear-gradient(135deg, var(--orange) 0%, #ff8c5a 100%);
-            color: white;
-            box-shadow: 0 4px 20px var(--orange-glow);
-        }
+  /* ─── 3D mockup of the RecordingWindow ───────────────────── */
+  .stage {
+    position: relative;
+    perspective: 1800px;
+    perspective-origin: 50% 30%;
+    height: 640px;
+    margin-top: 24px;
+  }
+  .stage::before {
+    content: "";
+    position: absolute;
+    inset: auto 0 -40px 0;
+    height: 260px;
+    background: radial-gradient(ellipse at center top, rgba(255, 106, 58, 0.22), transparent 70%);
+    filter: blur(40px);
+    z-index: 0;
+  }
 
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px var(--orange-glow);
-        }
+  .panel {
+    position: absolute;
+    transform-style: preserve-3d;
+    transition: transform 400ms var(--ease);
+  }
 
-        .btn-secondary {
-            background: var(--bg-card);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
+  /* Main recording panel — centered, tilted */
+  .panel-recording {
+    top: 70px;
+    left: 50%;
+    width: 460px;
+    transform:
+      translateX(-50%)
+      rotateX(14deg)
+      rotateY(-14deg)
+      translateZ(0);
+    z-index: 3;
+  }
+  .panel-recording:hover {
+    transform:
+      translateX(-50%)
+      rotateX(8deg)
+      rotateY(-8deg)
+      translateZ(30px);
+  }
 
-        .btn-secondary:hover {
-            border-color: var(--blue-neon);
-            box-shadow: 0 4px 20px var(--blue-glow);
-        }
+  /* Secondary panels — Preferences + History — offset */
+  .panel-prefs {
+    top: 30px;
+    left: -30px;
+    width: 380px;
+    transform:
+      rotateX(18deg)
+      rotateY(22deg)
+      translateZ(-80px);
+    opacity: 0.85;
+    z-index: 1;
+  }
+  .panel-history {
+    top: 140px;
+    right: -20px;
+    width: 340px;
+    transform:
+      rotateX(14deg)
+      rotateY(-28deg)
+      translateZ(-100px);
+    opacity: 0.72;
+    z-index: 2;
+  }
 
-        .btn svg {
-            width: 24px;
-            height: 24px;
-        }
+  /* Shared glass container */
+  .card {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%),
+      rgba(16, 14, 22, 0.7);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.15) inset,
+      0 0 0 0.5px rgba(0, 0, 0, 0.4),
+      0 24px 60px -20px rgba(0, 0, 0, 0.8),
+      0 60px 120px -40px rgba(0, 0, 0, 0.5);
+    padding: 22px;
+    overflow: hidden;
+  }
 
-        /* Section */
-        section {
-            padding: 100px 24px;
-        }
+  /* Reflection under the card */
+  .card::after {
+    content: "";
+    position: absolute;
+    bottom: -1px; left: 0; right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, transparent, rgba(255, 106, 58, 0.04));
+    pointer-events: none;
+  }
 
-        section h2 {
-            font-size: clamp(1.8rem, 4vw, 2.5rem);
-            text-align: center;
-            margin-bottom: 60px;
-        }
+  /* Waveform */
+  .waveform {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 3px;
+    height: 56px;
+    margin-bottom: 18px;
+  }
+  .waveform span {
+    flex: 1;
+    max-width: 5px;
+    border-radius: 99px;
+    background: linear-gradient(180deg, #ff9a6c, #ff6a3a 60%, #d14020);
+    animation: wave 1.2s ease-in-out infinite;
+  }
+  .waveform span:nth-child(3n) { animation-delay: 0.1s; }
+  .waveform span:nth-child(3n + 1) { animation-delay: 0.25s; }
+  .waveform span:nth-child(3n + 2) { animation-delay: 0.4s; }
+  @keyframes wave {
+    0%, 100% { height: 20%; }
+    50% { height: 90%; }
+  }
 
-        /* How it works */
-        .steps {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 32px;
-            max-width: 900px;
-            margin: 0 auto;
-        }
+  /* Status row */
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .rec-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .rec-badge .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #ff5a3a;
+    box-shadow: 0 0 0 0 rgba(255, 90, 58, 0.7);
+    animation: pulse 1.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 90, 58, 0.6); }
+    80%  { box-shadow: 0 0 0 14px rgba(255, 90, 58, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 90, 58, 0); }
+  }
+  .timer {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
 
-        .step {
-            text-align: center;
-            padding: 40px 24px;
-            background: var(--bg-card);
-            border-radius: 20px;
-            border: 1px solid var(--border-color);
-            transition: all 0.3s ease;
-        }
+  /* Mode pills */
+  .mode-row {
+    display: flex;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 4px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    align-items: center;
+  }
+  .mode-pill {
+    padding: 6px;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.55);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: all 180ms var(--ease);
+  }
+  .mode-pill svg { width: 14px; height: 14px; fill: currentColor; opacity: 0.9; }
+  .mode-pill.active {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    padding: 6px 14px 6px 10px;
+  }
+  .mode-hint {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--text-faint);
+    padding-right: 6px;
+  }
 
-        .step:hover {
-            border-color: var(--blue-neon);
-            box-shadow: 0 0 40px var(--blue-glow);
-        }
+  /* Project chip */
+  .project-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+  .project-chip .proj-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #5ed66a;
+  }
+  .project-chip .proj-name { color: var(--text); font-weight: 500; }
+  .project-chip .proj-conf { margin-left: auto; color: var(--text-faint); font-size: 11.5px; }
 
-        .step-number {
-            width: 50px;
-            height: 50px;
-            background: linear-gradient(135deg, var(--blue-neon) 0%, #0090cc 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin: 0 auto 20px;
-            box-shadow: 0 0 30px var(--blue-glow);
-        }
+  /* Capsule action buttons */
+  .action-row {
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+  }
+  .capsule {
+    padding: 9px 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+  }
+  .capsule svg { width: 11px; height: 11px; fill: currentColor; }
+  .capsule-secondary { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.88); }
+  .capsule-primary { background: rgba(255, 255, 255, 0.22); color: #fff; border-color: rgba(255, 255, 255, 0.35); }
 
-        .step h3 {
-            font-size: 1.3rem;
-            margin-bottom: 12px;
-        }
+  /* Preferences mockup content */
+  .prefs-sidebar { display: flex; gap: 16px; }
+  .prefs-nav { flex: 0 0 120px; }
+  .prefs-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    border-radius: 7px;
+    margin-bottom: 2px;
+  }
+  .prefs-nav-item.active { background: rgba(255, 255, 255, 0.08); color: #fff; }
+  .prefs-nav-item::before {
+    content: "";
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    background: currentColor;
+    opacity: 0.6;
+  }
+  .prefs-content { flex: 1; }
+  .prefs-field { margin-bottom: 10px; }
+  .prefs-label { font-size: 10.5px; color: var(--text-faint); margin-bottom: 4px; }
+  .prefs-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+  }
 
-        .step p {
-            color: var(--text-secondary);
-        }
+  /* History mockup */
+  .hist-row {
+    display: flex;
+    padding: 10px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11.5px;
+  }
+  .hist-row:last-child { border-bottom: 0; }
+  .hist-text { flex: 1; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-proj { color: var(--accent-2); font-weight: 500; margin-left: 10px; }
 
-        /* Features */
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 24px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
+  /* ─── Demo slot (for your GIF/MP4) ───────────────────────── */
+  .demo-slot {
+    margin-top: 80px;
+    padding: 40px;
+    border: 1px dashed var(--border-2);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 14px;
+  }
+  .demo-slot strong { color: var(--text); display: block; margin-bottom: 6px; }
 
-        .feature {
-            padding: 32px;
-            background: var(--bg-card);
-            border-radius: 16px;
-            border: 1px solid var(--border-color);
-            transition: all 0.3s ease;
-        }
+  /* ─── Section headers ────────────────────────────────────── */
+  .section-label {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  h2.section-title {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: clamp(36px, 5vw, 56px);
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+    max-width: 800px;
+  }
+  h2.section-title em { color: var(--accent); font-style: italic; }
+  .section-sub {
+    font-size: 17px;
+    color: var(--text-dim);
+    max-width: 640px;
+    margin-bottom: 48px;
+    line-height: 1.5;
+  }
 
-        .feature:hover {
-            transform: translateY(-4px);
-            border-color: var(--orange);
-        }
+  /* ─── Super Mode ─────────────────────────────────────────── */
+  #super-mode {
+    position: relative;
+  }
+  .super-card {
+    background:
+      linear-gradient(135deg, rgba(255, 106, 58, 0.14) 0%, rgba(255, 106, 58, 0.02) 60%),
+      rgba(18, 15, 22, 0.5);
+    border: 1px solid rgba(255, 106, 58, 0.2);
+    border-radius: var(--radius-lg);
+    padding: 48px;
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 48px;
+    align-items: center;
+    box-shadow: 0 40px 80px -40px rgba(255, 106, 58, 0.25);
+  }
+  .super-card h3 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 48px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+  .super-card h3 em { color: var(--accent); font-style: italic; }
+  .super-card p { color: var(--text-dim); font-size: 16px; margin-bottom: 16px; }
+  .super-card ul { list-style: none; padding: 0; margin-top: 22px; }
+  .super-card ul li {
+    padding: 10px 0;
+    color: var(--text-dim);
+    font-size: 14.5px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+  }
+  .super-card ul li::before {
+    content: "→";
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .super-demo {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-height: 280px;
+  }
+  .super-step {
+    margin-bottom: 16px;
+    padding-left: 18px;
+    position: relative;
+  }
+  .super-step::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 6px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .super-step-label { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px; }
+  .super-step-text { color: var(--text); font-size: 13px; }
+  .super-step-text.cmd { color: var(--accent-2); }
+  .super-step-text.output { color: #5ed66a; }
 
-        .feature-icon {
-            font-size: 2.5rem;
-            margin-bottom: 16px;
-        }
+  /* ─── Features grid ──────────────────────────────────────── */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .feature {
+    padding: 28px;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: all 240ms var(--ease);
+  }
+  .feature:hover {
+    border-color: var(--border-2);
+    transform: translateY(-2px);
+    box-shadow: 0 20px 40px -20px rgba(0, 0, 0, 0.6);
+  }
+  .feature-icon {
+    width: 36px; height: 36px;
+    border-radius: 9px;
+    background: var(--accent-soft);
+    border: 1px solid rgba(255, 106, 58, 0.25);
+    display: grid; place-items: center;
+    margin-bottom: 18px;
+    color: var(--accent);
+  }
+  .feature-icon svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+  .feature h4 { font-size: 16px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.01em; }
+  .feature p { color: var(--text-dim); font-size: 14px; line-height: 1.55; }
 
-        .feature h3 {
-            font-size: 1.1rem;
-            margin-bottom: 8px;
-        }
+  /* ─── Comparison ─────────────────────────────────────────── */
+  .compare-wrap { overflow-x: auto; }
+  table.compare {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  table.compare th,
+  table.compare td {
+    padding: 18px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  table.compare tr:last-child td { border-bottom: 0; }
+  table.compare thead {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  table.compare th {
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  table.compare th.us {
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 15px;
+  }
+  table.compare td:first-child { color: var(--text); font-weight: 500; width: 30%; }
+  table.compare td.us { color: var(--text); background: rgba(255, 106, 58, 0.04); font-weight: 500; }
+  table.compare .yes { color: #5ed66a; }
+  table.compare .no  { color: var(--text-faint); }
+  table.compare .note { color: var(--text-dim); font-size: 13px; }
 
-        .feature p {
-            color: var(--text-secondary);
-            font-size: 0.95rem;
-        }
+  /* ─── Story ──────────────────────────────────────────────── */
+  .story-card {
+    padding: 48px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    max-width: 820px;
+  }
+  .story-card p {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 22px;
+    line-height: 1.45;
+    color: var(--text);
+    margin-bottom: 18px;
+  }
+  .story-card p:last-of-type { margin-bottom: 0; }
+  .story-card em { font-style: italic; color: var(--accent); }
+  .story-author {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  .story-author strong { color: var(--text); font-family: 'Inter', sans-serif; font-weight: 600; }
 
-        /* Providers */
-        .providers {
-            display: flex;
-            gap: 24px;
-            justify-content: center;
-            flex-wrap: wrap;
-            max-width: 700px;
-            margin: 0 auto;
-        }
+  /* ─── Final CTA ──────────────────────────────────────────── */
+  .final-cta {
+    text-align: center;
+    padding: 80px 40px;
+    background:
+      radial-gradient(ellipse at center, rgba(255, 106, 58, 0.12), transparent 70%),
+      var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-lg);
+  }
+  .final-cta h2 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: clamp(36px, 5vw, 56px);
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+  .final-cta p { color: var(--text-dim); font-size: 17px; margin-bottom: 32px; }
+  .final-cta .cta-row { justify-content: center; margin-bottom: 0; }
+  .final-cta-sub {
+    margin-top: 28px;
+    font-size: 13px;
+    color: var(--text-faint);
+  }
 
-        .provider {
-            flex: 1;
-            min-width: 280px;
-            padding: 32px;
-            background: var(--bg-card);
-            border-radius: 16px;
-            border: 1px solid var(--border-color);
-            text-align: center;
-        }
+  /* ─── Footer ─────────────────────────────────────────────── */
+  footer {
+    padding: 48px 0 32px;
+    border-top: 1px solid var(--border);
+    margin-top: 64px;
+  }
+  .foot-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    color: var(--text-faint);
+    font-size: 13px;
+  }
+  .foot-links { display: flex; gap: 20px; }
+  .foot-links a { color: var(--text-dim); text-decoration: none; }
+  .foot-links a:hover { color: var(--text); }
 
-        .provider h3 {
-            font-size: 1.3rem;
-            margin-bottom: 8px;
-        }
+  /* ─── Responsive ─────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .features { grid-template-columns: 1fr; }
+    .super-card { grid-template-columns: 1fr; padding: 32px; }
+    .super-card h3 { font-size: 36px; }
+    .panel-prefs, .panel-history { display: none; }
+    .panel-recording { transform: translateX(-50%) rotateX(4deg) rotateY(0); width: 90%; max-width: 460px; }
+    .stage { height: 520px; }
+    .nav-links a:not(.nav-btn) { display: none; }
+  }
 
-        .provider .model {
-            color: var(--blue-neon);
-            font-family: monospace;
-            font-size: 0.9rem;
-            margin-bottom: 12px;
-        }
-
-        .provider .price {
-            color: var(--orange);
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        /* Final CTA */
-        .final-cta {
-            text-align: center;
-            padding: 80px 24px;
-            background: linear-gradient(180deg, transparent 0%, rgba(0, 180, 255, 0.05) 100%);
-        }
-
-        .final-cta h2 {
-            margin-bottom: 16px;
-        }
-
-        .final-cta p {
-            color: var(--text-secondary);
-            margin-bottom: 40px;
-            font-size: 1.1rem;
-        }
-
-        /* Footer */
-        footer {
-            text-align: center;
-            padding: 40px 24px;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            border-top: 1px solid var(--border-color);
-        }
-
-        footer a {
-            color: var(--blue-neon);
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            text-decoration: underline;
-        }
-
-        /* Responsive */
-        @media (max-width: 600px) {
-            .cta-group {
-                flex-direction: column;
-                width: 100%;
-                max-width: 300px;
-            }
-
-            .btn {
-                justify-content: center;
-            }
-
-            .hero {
-                padding: 40px 16px;
-            }
-
-            section {
-                padding: 60px 16px;
-            }
-        }
-    </style>
+  @media (prefers-reduced-motion: reduce) {
+    .waveform span { animation: none; height: 50%; }
+    .rec-badge .dot { animation: none; }
+    * { scroll-behavior: auto !important; }
+  }
+</style>
 </head>
+
 <body>
-    <div class="bg-glow"></div>
 
-    <!-- Hero -->
-    <section class="hero">
-        <img src="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png" alt="Whisper Voice" class="logo">
-        <h1>Whisper Voice</h1>
-        <p class="tagline">Press a shortcut, speak, <strong>text appears at your cursor</strong>. With AI modes to clean, format, and structure your text.</p>
+<div class="ambient" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
 
-        <div class="cta-group">
-            <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-AppleSilicon.dmg" class="btn btn-primary">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                Mac (M1/M2/M3)
-            </a>
-            <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-Intel.dmg" class="btn btn-secondary">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                Mac (Intel)
-            </a>
-            <a href="https://github.com/hugoblanc/whisper-voice-windows/releases/latest/download/WhisperVoice.exe" class="btn btn-secondary">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75l6-1.32v6.48L3 12m17-9v8.75l-10 .15V5.21L20 3M3 13l6 .09v6.81l-6-1.15V13m17 .25V22l-10-1.91V13.1l10 .15z"/></svg>
-                Windows
-            </a>
-        </div>
+<nav>
+  <div class="nav-inner">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+      </div>
+      Whisper Voice
+    </div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#compare">Compare</a>
+      <a href="https://github.com/hugoblanc/whisper-voice/tree/main/docs">Docs</a>
+      <a href="https://github.com/hugoblanc/whisper-voice" class="nav-btn">GitHub →</a>
+    </div>
+  </div>
+</nav>
 
-        <div class="scroll-indicator" onclick="window.scrollBy({top: window.innerHeight, behavior: 'smooth'})">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-        </div>
-    </section>
+<main>
 
-    <!-- How it works -->
-    <section>
-        <div class="container">
-            <h2>How it works</h2>
-            <div class="steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <h3>Press shortcut</h3>
-                    <p>Option+Space to toggle, or hold F3 for push-to-talk</p>
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- HERO -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="hero">
+    <div class="wrap">
+      <div class="badge">
+        <span class="dot">3.6</span>
+        <strong>v3.6.1</strong> · SwiftUI Preferences, Liquid-Glass recording panel
+      </div>
+
+      <h1 class="display">
+        Dictate anywhere.<br />
+        <em>Polished text</em> appears at your cursor.
+      </h1>
+
+      <p class="hero-sub">
+        Press Option+Space, speak, stop. Whisper Voice transcribes, reformats for the target app (Slack, Mail, Markdown…), and pastes — all in one breath.
+      </p>
+
+      <div class="value-chips">
+        <span class="value-chip">Free forever</span>
+        <span class="value-chip">Open source (MIT)</span>
+        <span class="value-chip">100% local option</span>
+        <span class="value-chip">BYOK (OpenAI / Mistral)</span>
+        <span class="value-chip">macOS 13+</span>
+      </div>
+
+      <div class="cta-row">
+        <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-AppleSilicon.dmg" class="btn btn-primary">
+          Download for Apple Silicon
+          <small>M1 · M2 · M3 · M4 — universal DMG</small>
+        </a>
+        <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-Intel.dmg" class="btn btn-ghost">
+          Intel Mac
+          <small>x86_64</small>
+        </a>
+        <a href="https://github.com/hugoblanc/whisper-voice" class="btn btn-ghost">
+          Build from source
+          <small>./install.sh</small>
+        </a>
+      </div>
+
+      <!-- 3D mockup stage — recreates the actual RecordingWindow in CSS -->
+      <div class="stage" aria-hidden="true">
+
+        <!-- Preferences panel, back-left -->
+        <div class="panel panel-prefs">
+          <div class="card">
+            <div style="font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 14px;">Preferences</div>
+            <div class="prefs-sidebar">
+              <div class="prefs-nav">
+                <div class="prefs-nav-item active">General</div>
+                <div class="prefs-nav-item">Shortcuts</div>
+                <div class="prefs-nav-item">Modes</div>
+                <div class="prefs-nav-item">Auto-mode</div>
+                <div class="prefs-nav-item">Projects</div>
+                <div class="prefs-nav-item">Logs</div>
+              </div>
+              <div class="prefs-content">
+                <div class="prefs-field">
+                  <div class="prefs-label">Provider</div>
+                  <div class="prefs-input">OpenAI Whisper</div>
                 </div>
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <h3>Speak</h3>
-                    <p>Say whatever you want in any language</p>
+                <div class="prefs-field">
+                  <div class="prefs-label">API Key</div>
+                  <div class="prefs-input">sk-••••••••••••••••</div>
                 </div>
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <h3>Done</h3>
-                    <p>Text is automatically pasted at your cursor</p>
+                <div class="prefs-field">
+                  <div class="prefs-label">Processing model</div>
+                  <div class="prefs-input">gpt-5.4-nano</div>
                 </div>
+              </div>
             </div>
+          </div>
         </div>
-    </section>
 
-    <!-- Features -->
-    <section>
-        <div class="container">
-            <h2>Features</h2>
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">✨</div>
-                    <h3>AI Processing Modes</h3>
-                    <p>Clean, Formal, Casual, Markdown + create your own custom modes. (Mac)</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">⚡</div>
-                    <h3>Super Mode</h3>
-                    <p>Select text, speak an instruction, AI transforms it in place. (Mac)</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">📊</div>
-                    <h3>Live Waveform</h3>
-                    <p>Beautiful recording window with animated audio visualization. (Mac)</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🎙️</div>
-                    <h3>Custom Vocabulary</h3>
-                    <p>Add proper nouns and technical terms for better recognition. (Mac)</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🔒</div>
-                    <h3>100% Offline Mode</h3>
-                    <p>Local transcription with whisper.cpp. No API, no cloud. (Mac)</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🔄</div>
-                    <h3>Auto-Update</h3>
-                    <p>One-click auto-install updates and launch at login. (Mac)</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🎛️</div>
-                    <h3>Mode Manager</h3>
-                    <p>Create custom AI modes, enable/disable them individually. (Mac)</p>
-                </div>
+        <!-- History panel, back-right -->
+        <div class="panel panel-history">
+          <div class="card" style="padding: 16px;">
+            <div style="font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 14px;">Transcription History</div>
+            <div class="hist-row">
+              <div class="hist-text">Cherche dans PostHog les Rage Clicks…</div>
+              <div class="hist-proj">superproper</div>
             </div>
-        </div>
-    </section>
-
-    <!-- Providers -->
-    <section>
-        <div class="container">
-            <h2>Choose your AI provider</h2>
-            <p style="text-align: center; color: var(--text-secondary); margin-bottom: 32px; margin-top: -40px;">Bring your own API key, or go fully offline with local mode.</p>
-            <div class="providers">
-                <div class="provider" style="border-color: var(--orange);">
-                    <h3>🔒 Local (whisper.cpp)</h3>
-                    <p class="model">ggml-medium</p>
-                    <p class="price" style="color: var(--orange);">Free · Offline</p>
-                </div>
-                <div class="provider">
-                    <h3>OpenAI Whisper</h3>
-                    <p class="model">gpt-4o-mini-transcribe</p>
-                    <p class="price">$0.003/min</p>
-                </div>
-                <div class="provider">
-                    <h3>Mistral Voxtral</h3>
-                    <p class="model">voxtral-mini-latest</p>
-                    <p class="price">$0.001/min</p>
-                </div>
+            <div class="hist-row">
+              <div class="hist-text">Hello Tim, on a eu pas mal de…</div>
+              <div class="hist-proj">superproper</div>
             </div>
+            <div class="hist-row">
+              <div class="hist-text">Prépare un commit propre pour…</div>
+              <div class="hist-proj">whisper-voice</div>
+            </div>
+            <div class="hist-row">
+              <div class="hist-text">Merci beaucoup pour votre retour…</div>
+              <div class="hist-proj">—</div>
+            </div>
+          </div>
         </div>
-    </section>
 
-    <!-- Final CTA -->
-    <section class="final-cta">
-        <h2>Ready to type with your voice?</h2>
-        <p>Download now. Setup takes 2 minutes.</p>
-        <div class="cta-group">
-            <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-AppleSilicon.dmg" class="btn btn-primary">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                Mac (M1/M2/M3)
-            </a>
-            <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-Intel.dmg" class="btn btn-secondary">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                Mac (Intel)
-            </a>
-            <a href="https://github.com/hugoblanc/whisper-voice-windows/releases/latest/download/WhisperVoice.exe" class="btn btn-secondary">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75l6-1.32v6.48L3 12m17-9v8.75l-10 .15V5.21L20 3M3 13l6 .09v6.81l-6-1.15V13m17 .25V22l-10-1.91V13.1l10 .15z"/></svg>
-                Windows
-            </a>
+        <!-- Main recording panel, centered front -->
+        <div class="panel panel-recording">
+          <div class="card">
+            <!-- Live waveform (animated) -->
+            <div class="waveform">
+              <span style="height: 20%"></span><span style="height: 35%"></span><span style="height: 55%"></span>
+              <span style="height: 65%"></span><span style="height: 82%"></span><span style="height: 70%"></span>
+              <span style="height: 85%"></span><span style="height: 62%"></span><span style="height: 48%"></span>
+              <span style="height: 72%"></span><span style="height: 88%"></span><span style="height: 90%"></span>
+              <span style="height: 70%"></span><span style="height: 55%"></span><span style="height: 42%"></span>
+              <span style="height: 65%"></span><span style="height: 78%"></span><span style="height: 82%"></span>
+              <span style="height: 68%"></span><span style="height: 52%"></span><span style="height: 45%"></span>
+              <span style="height: 60%"></span><span style="height: 75%"></span><span style="height: 85%"></span>
+              <span style="height: 72%"></span><span style="height: 58%"></span><span style="height: 40%"></span>
+              <span style="height: 50%"></span><span style="height: 62%"></span><span style="height: 70%"></span>
+              <span style="height: 55%"></span><span style="height: 42%"></span><span style="height: 30%"></span>
+            </div>
+
+            <!-- Status + timer -->
+            <div class="status-row">
+              <div class="rec-badge">
+                <div class="dot"></div>
+                <span>Recording</span>
+              </div>
+              <div class="timer">0:07</div>
+            </div>
+
+            <!-- Mode selector -->
+            <div class="mode-row">
+              <div class="mode-pill">
+                <svg viewBox="0 0 24 24"><path d="M7 10v4h3l5 5V5L10 10H7z"/></svg>
+              </div>
+              <div class="mode-pill active">
+                <svg viewBox="0 0 24 24"><path d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z"/></svg>
+                <span>Super</span>
+              </div>
+              <div class="mode-pill">
+                <svg viewBox="0 0 24 24"><path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27z"/></svg>
+              </div>
+              <div class="mode-hint">⇧ switch</div>
+            </div>
+
+            <!-- Project chip -->
+            <div class="project-chip">
+              <span style="color: var(--text-faint);">in:</span>
+              <span class="proj-dot"></span>
+              <span class="proj-name">whisper-voice</span>
+              <span class="proj-conf">94%</span>
+            </div>
+
+            <!-- Capsule actions -->
+            <div class="action-row">
+              <div class="capsule capsule-secondary">
+                <svg viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                Cancel
+              </div>
+              <div class="capsule capsule-primary">
+                <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                Stop
+              </div>
+            </div>
+          </div>
         </div>
-    </section>
 
-    <!-- Footer -->
-    <footer>
-        <p>
-            Open source (MIT License) ·
-            <a href="https://github.com/hugoblanc/whisper-voice">Mac repo</a> ·
-            <a href="https://github.com/hugoblanc/whisper-voice-windows">Windows repo</a>
-        </p>
-        <p style="margin-top: 8px;">
-            Made with ❤️ by <a href="https://github.com/hugoblanc">Hugo Blanc</a>
-        </p>
-    </footer>
+      </div>
+
+      <!-- Demo video slot -->
+      <div class="demo-slot">
+        <strong>📼 Demo video goes here</strong>
+        Drop an 8-12s MP4/WebM of Slack → Option+Space → speaking → clean text appearing in live. Record with QuickTime, trim in Gifski or ScreenStudio. Replace this block with a &lt;video&gt; tag pointing to /docs/demo.mp4 (autoplay, loop, muted, playsinline).
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- SUPER MODE — dedicated section -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="super-mode">
+    <div class="wrap">
+      <div class="section-label">Super Mode</div>
+      <h2 class="section-title">Select text. Speak your edit. <em>Done.</em></h2>
+      <p class="section-sub">
+        Voice-controlled Cursor for any text field. Highlight an email, speak *"make it shorter and less formal"*, and the edit is pasted back in place.
+      </p>
+
+      <div class="super-card">
+        <div>
+          <h3>The <em>voice Cursor</em> that works everywhere.</h3>
+          <p>Your cursor becomes a voice-operated editor. No extension, no sidebar, no context switch. Works in Gmail, Notion, Slack, Linear, even plain textareas.</p>
+          <ul>
+            <li>Keeps the file/URL context as a hint for the LLM</li>
+            <li>Git repo, branch and cwd auto-injected when you're in a terminal or IDE</li>
+            <li>No text selected? Speak a free-form instruction — it acts like a pocket assistant</li>
+          </ul>
+        </div>
+
+        <div class="super-demo">
+          <div class="super-step">
+            <div class="super-step-label">1 · Selected text</div>
+            <div class="super-step-text">"Hi team, I want to let you know we are launching the new feature next week…"</div>
+          </div>
+          <div class="super-step">
+            <div class="super-step-label">2 · Spoken instruction</div>
+            <div class="super-step-text cmd">⏺ "Make it one punchy sentence with one emoji."</div>
+          </div>
+          <div class="super-step">
+            <div class="super-step-label">3 · Pasted back</div>
+            <div class="super-step-text output">🚀 New feature ships next week — team, hold tight.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- FEATURES GRID -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="features">
+    <div class="wrap">
+      <div class="section-label">Features</div>
+      <h2 class="section-title">Built for the way you <em>actually</em> write.</h2>
+
+      <div class="features">
+        <div class="feature">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          </div>
+          <h4>6 processing modes</h4>
+          <p>Brut, Clean, Formel, Casual, Markdown, Super. Shift-cycle during recording. Or create your own with custom prompts.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h7"/><path d="M16 17l3 3 4-5"/></svg>
+          </div>
+          <h4>Auto-mode by app</h4>
+          <p>Map Slack → Slack mode, Mail → Formel. Whisper Voice detects the frontmost app and switches automatically. Resets to Brut between unrelated apps.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>
+          </div>
+          <h4>Projects with smart tagging</h4>
+          <p>History auto-tags entries to your projects via git remote, workspace hint, browser host. Filter, search, retro-tag in bulk.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-8-8"/><path d="M20 4v6h-6"/></svg>
+          </div>
+          <h4>Full pipeline audit</h4>
+          <p>Every dictation logs input, system prompt, output, char delta. Built-in log viewer. You always know exactly what the LLM did with your voice.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 4l16 16M20 4L4 20"/></svg>
+          </div>
+          <h4>Dual-format clipboard</h4>
+          <p>HTML + plain text. Slack, Notion, Gmail get rendered bold/code/lists. Terminal and editors get the raw markdown. No &lt;br&gt; nonsense.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4 2 8L12 17l-6.5 4 2-8L2 9h7z"/></svg>
+          </div>
+          <h4>Custom vocabulary</h4>
+          <p>Add your product names (PostHog, Chatwoot…) once. Biases Whisper AND the LLM prompt so your jargon survives transcription and reformatting.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- COMPARISON -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="compare">
+    <div class="wrap">
+      <div class="section-label">Compare</div>
+      <h2 class="section-title">vs. the paid <em>alternatives</em>.</h2>
+      <p class="section-sub">
+        Whisper Voice vs Superwhisper, FreeFlow / Whispering, and macOS dictation. No marketing lies — the honest rundown.
+      </p>
+
+      <div class="compare-wrap">
+        <table class="compare">
+          <thead>
+            <tr>
+              <th></th>
+              <th class="us">Whisper Voice</th>
+              <th>Superwhisper</th>
+              <th>FreeFlow / Whispering</th>
+              <th>macOS Dictation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Price</td>
+              <td class="us">Free forever</td>
+              <td>€10/month</td>
+              <td>Free (BYOK)</td>
+              <td>Free</td>
+            </tr>
+            <tr>
+              <td>Open source</td>
+              <td class="us yes">Yes · MIT</td>
+              <td class="no">No</td>
+              <td class="yes">Yes</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td>BYOK (your API key)</td>
+              <td class="us yes">OpenAI · Mistral · local</td>
+              <td>Bundled</td>
+              <td class="yes">Yes</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>100% offline option</td>
+              <td class="us yes">whisper.cpp built-in</td>
+              <td class="yes">Yes</td>
+              <td class="no">Partial</td>
+              <td class="yes">Yes</td>
+            </tr>
+            <tr>
+              <td>AI post-processing modes</td>
+              <td class="us">6 built-in + custom prompts</td>
+              <td>Yes</td>
+              <td>Limited</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td>Super Mode (voice-edit selection)</td>
+              <td class="us yes">Yes</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td>App-aware auto-select</td>
+              <td class="us yes">Yes</td>
+              <td>Partial</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td>Project tagging + history</td>
+              <td class="us yes">Yes · auto-tagged</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+            </tr>
+            <tr>
+              <td>HTML clipboard (Slack markup)</td>
+              <td class="us yes">Yes</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+              <td class="no">No</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- STORY -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="story">
+    <div class="wrap">
+      <div class="section-label">Why I built this</div>
+      <h2 class="section-title">Paid <em>€10/month</em> for what a weekend could ship.</h2>
+
+      <div class="story-card">
+        <p>I was paying <em>€10/month</em> to Superwhisper. Great app, but I used it 5 minutes a day and I knew the tech was an OpenAI Whisper API call behind a UI.</p>
+        <p>So I ran the numbers: €120/year × thousands of users = a fat margin on top of a ~$0.06/hour API cost. I figured the UI was the only real moat.</p>
+        <p>Three weekends later, Whisper Voice had feature parity + a few things Superwhisper doesn't have (Super Mode, project auto-tagging, dual-clipboard). I open-sourced it under MIT.</p>
+        <p>If you dictate, I want this to be the last voice-to-text tool you ever install. If you want to fork, rebrand, or ship your own flavor — go for it.</p>
+        <div class="story-author">
+          Built by <strong>Hugo Blanc</strong> · co-founder @ Superproper · <a href="https://github.com/hugoblanc" style="color: var(--accent); text-decoration: none;">@hugoblanc</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- FINAL CTA -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="download">
+    <div class="wrap">
+      <div class="final-cta">
+        <h2>Stop paying for an <em>API wrapper</em>.</h2>
+        <p>4 MB. Free forever. Your keys, your data, your Mac.</p>
+        <div class="cta-row">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-AppleSilicon.dmg" class="btn btn-primary">
+            Download for Apple Silicon
+          </a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-Intel.dmg" class="btn btn-ghost">
+            Intel Mac
+          </a>
+        </div>
+        <div class="final-cta-sub">
+          v3.6.1 · Signed + notarized by Apple · macOS 13+ · <a href="https://github.com/hugoblanc/whisper-voice" style="color: var(--text-dim); text-decoration: underline;">Source on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-inner">
+      <div>© 2026 Whisper Voice · MIT license · Built with ♥ in Paris</div>
+      <div class="foot-links">
+        <a href="https://github.com/hugoblanc/whisper-voice">GitHub</a>
+        <a href="https://github.com/hugoblanc/whisper-voice/tree/main/docs">Docs</a>
+        <a href="https://github.com/hugoblanc/whisper-voice/issues">Issues</a>
+        <a href="https://github.com/hugoblanc/whisper-voice/releases">Releases</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Gentle parallax on the 3D stage — follows mouse X/Y without eating CPU.
+  const stage = document.querySelector('.stage');
+  const panelMain = document.querySelector('.panel-recording');
+  const panelPrefs = document.querySelector('.panel-prefs');
+  const panelHist  = document.querySelector('.panel-history');
+  if (stage && panelMain && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let raf = 0;
+    let targetX = 0, targetY = 0, curX = 0, curY = 0;
+    stage.addEventListener('mousemove', (e) => {
+      const rect = stage.getBoundingClientRect();
+      targetX = (e.clientX - rect.left - rect.width / 2) / rect.width;   // -0.5..0.5
+      targetY = (e.clientY - rect.top  - rect.height / 2) / rect.height;
+      if (!raf) raf = requestAnimationFrame(loop);
+    });
+    stage.addEventListener('mouseleave', () => {
+      targetX = 0; targetY = 0;
+      if (!raf) raf = requestAnimationFrame(loop);
+    });
+    function loop() {
+      curX += (targetX - curX) * 0.08;
+      curY += (targetY - curY) * 0.08;
+      const tiltY = -14 + curX * 10;
+      const tiltX = 14  - curY * 6;
+      panelMain.style.transform = `translateX(-50%) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateZ(0)`;
+      panelPrefs.style.transform = `rotateX(${18 - curY * 4}deg) rotateY(${22 + curX * 6}deg) translateZ(-80px) translateX(${curX * -10}px)`;
+      panelHist.style.transform  = `rotateX(${14 - curY * 3}deg) rotateY(${-28 + curX * 6}deg) translateZ(-100px) translateX(${curX * 10}px)`;
+      if (Math.abs(targetX - curX) > 0.001 || Math.abs(targetY - curY) > 0.001) {
+        raf = requestAnimationFrame(loop);
+      } else {
+        raf = 0;
+      }
+    }
+  }
+</script>
+
 </body>
 </html>
