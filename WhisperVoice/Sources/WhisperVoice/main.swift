@@ -2862,11 +2862,11 @@ class ModeSelectorView: NSView {
             container.alphaValue = isAvailable ? 1.0 : 0.35
 
             if isSelected && isAvailable {
-                // Active state uses the system accent color — matches macOS Tahoe
-                // capsule selection style, reads as clearly "this is active".
-                container.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
+                // Active state — translucent white fill instead of full accent
+                // to keep the HUD aesthetic tonal (matches Cancel/Stop buttons).
+                container.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.22).cgColor
                 container.layer?.borderWidth = 0.5
-                container.layer?.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
+                container.layer?.borderColor = NSColor.white.withAlphaComponent(0.35).cgColor
             }
 
             // Icon
@@ -2917,11 +2917,11 @@ class ModeSelectorView: NSView {
                 container.frame = NSRect(x: xOffset, y: 4, width: width, height: self.itemHeight)
                 container.alphaValue = isAvailable ? 1.0 : 0.35
                 container.layer?.backgroundColor = isSelected && isAvailable
-                    ? NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
+                    ? NSColor.white.withAlphaComponent(0.22).cgColor
                     : NSColor.clear.cgColor
                 container.layer?.borderWidth = (isSelected && isAvailable) ? 0.5 : 0
                 container.layer?.borderColor = (isSelected && isAvailable)
-                    ? NSColor.white.withAlphaComponent(0.25).cgColor
+                    ? NSColor.white.withAlphaComponent(0.35).cgColor
                     : NSColor.clear.cgColor
 
                 // Update icon position and color
@@ -4802,18 +4802,24 @@ final class CapsuleButton: NSView {
 
     private func refreshStyle() {
         layer?.borderWidth = 1
+        // Both variants stay tonal / translucent — no accent-color wash, which
+        // fights the HUD glass aesthetic. Primary = brighter fill + stronger edge.
         if isPrimary {
-            let base = NSColor.controlAccentColor
-            layer?.backgroundColor = base.withAlphaComponent(isPressed ? 0.85 : (isHovering ? 0.95 : 0.9)).cgColor
-            layer?.borderColor = base.withAlphaComponent(0.3).cgColor
+            let fill = isPressed ? 0.32 : (isHovering ? 0.26 : 0.20)
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(CGFloat(fill)).cgColor
+            layer?.borderColor = NSColor.white.withAlphaComponent(0.35).cgColor
+            titleField.textColor = .white
+            iconView.contentTintColor = .white
         } else if isDestructive {
             let base = NSColor.systemRed
             layer?.backgroundColor = base.withAlphaComponent(isPressed ? 0.35 : (isHovering ? 0.25 : 0.15)).cgColor
             layer?.borderColor = base.withAlphaComponent(0.5).cgColor
         } else {
-            let fill = isPressed ? 0.18 : (isHovering ? 0.14 : 0.08)
+            let fill = isPressed ? 0.14 : (isHovering ? 0.10 : 0.06)
             layer?.backgroundColor = NSColor.white.withAlphaComponent(CGFloat(fill)).cgColor
             layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+            titleField.textColor = NSColor.white.withAlphaComponent(0.88)
+            iconView.contentTintColor = NSColor.white.withAlphaComponent(0.88)
         }
     }
 
@@ -4853,6 +4859,7 @@ class RecordingWindow: NSObject {
     private var window: NSPanel!
     private var waveformView: WaveformView!
     private var statusDot: NSView!
+    private var statusDotHalo: NSView!  // Larger sibling that pulses with audio — placed behind statusDot
     private var statusLabel: NSTextField!
     private var timerLabel: NSTextField!
     private var cancelCapsuleButton: CapsuleButton?
@@ -4911,33 +4918,35 @@ class RecordingWindow: NSObject {
         contentView.layer?.cornerRadius = 20
         contentView.layer?.masksToBounds = true
 
-        // Translucent material base — the "glass" layer.
+        // Translucent material base — the "glass" layer. `.fullScreenUI` gives
+        // a heavier blur closer to the native volume/brightness HUD on Tahoe
+        // than `.hudWindow`. `.behindWindow` lets the desktop / apps bleed through.
         let effect = NSVisualEffectView(frame: contentView.bounds)
         effect.autoresizingMask = [.width, .height]
-        effect.material = .hudWindow
+        effect.material = .fullScreenUI
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 20
+        effect.layer?.cornerRadius = 22
         effect.layer?.masksToBounds = true
         contentView.addSubview(effect, positioned: .below, relativeTo: nil)
 
-        // Dark tint layered on top of the blur so the content stays readable
-        // even on bright wallpapers without killing the translucency effect.
+        // Very light darkening just so white text stays readable on bright
+        // wallpapers — 0.18 instead of 0.55 previously (was killing translucency).
         let tint = NSView(frame: contentView.bounds)
         tint.autoresizingMask = [.width, .height]
         tint.wantsLayer = true
-        tint.layer?.backgroundColor = NSColor(white: 0.04, alpha: 0.55).cgColor
+        tint.layer?.backgroundColor = NSColor(white: 0.0, alpha: 0.18).cgColor
         contentView.addSubview(tint, positioned: .above, relativeTo: effect)
 
-        // Glass highlight: thin 1px stroke on the full perimeter for a refracted
-        // edge feel. Inset by 0.5 so the stroke is pixel-aligned inside the bounds.
+        // Glass highlight: brighter 1px stroke + subtle inner glow layer for
+        // refraction feel — much closer to macOS Tahoe's native HUDs.
         let highlight = CAShapeLayer()
         let strokeRect = contentView.bounds.insetBy(dx: 0.5, dy: 0.5)
         highlight.frame = contentView.bounds
-        highlight.path = CGPath(roundedRect: strokeRect, cornerWidth: 19.5, cornerHeight: 19.5, transform: nil)
+        highlight.path = CGPath(roundedRect: strokeRect, cornerWidth: 21.5, cornerHeight: 21.5, transform: nil)
         highlight.lineWidth = 1
-        highlight.strokeColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        highlight.strokeColor = NSColor.white.withAlphaComponent(0.28).cgColor
         highlight.fillColor = NSColor.clear.cgColor
         contentView.layer?.addSublayer(highlight)
 
@@ -4946,18 +4955,20 @@ class RecordingWindow: NSObject {
         contentView.addSubview(waveformView)
 
         // Status row: dot + label + timer
+        // Halo is a sibling of the dot (not a sublayer) so it isn't clipped by
+        // the dot's corner-radius masking. Centered on the dot, larger (28x28),
+        // tied to live audio level via updateStatusDotHalo.
+        statusDotHalo = NSView(frame: NSRect(x: 7, y: 141, width: 28, height: 28))
+        statusDotHalo.wantsLayer = true
+        statusDotHalo.layer?.cornerRadius = 14
+        statusDotHalo.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.5).cgColor
+        statusDotHalo.alphaValue = 0
+        contentView.addSubview(statusDotHalo)
+
         statusDot = NSView(frame: NSRect(x: 16, y: 150, width: 10, height: 10))
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
         statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
-        // Outer "halo" layer that pulses with audio — stronger glow when speaking.
-        let dotHalo = CALayer()
-        dotHalo.frame = CGRect(x: -6, y: -6, width: 22, height: 22)
-        dotHalo.cornerRadius = 11
-        dotHalo.backgroundColor = NSColor.systemRed.withAlphaComponent(0.35).cgColor
-        dotHalo.opacity = 0
-        dotHalo.name = "halo"
-        statusDot.layer?.addSublayer(dotHalo)
         contentView.addSubview(statusDot)
 
         statusLabel = NSTextField(labelWithString: "Recording")
@@ -5101,49 +5112,49 @@ class RecordingWindow: NSObject {
 
     private var pulseTimer: Timer?
     private var haloLevel: Float = 0
+    private var haloActive: Bool = false
 
-    private func haloLayer() -> CALayer? {
-        statusDot.layer?.sublayers?.first(where: { $0.name == "halo" })
-    }
-
-    /// Smoothed opacity + subtle scale modulation of the halo based on input audio.
+    /// Smoothed alpha + subtle scale modulation of the halo based on input audio.
     private func updateStatusDotHalo(level: Float) {
+        guard haloActive, let halo = statusDotHalo, let layer = halo.layer else { return }
         // Ease toward the new level so the halo doesn't jitter.
-        haloLevel = haloLevel * 0.6 + max(0, min(1, level)) * 0.4
-        guard let halo = haloLayer() else { return }
+        haloLevel = haloLevel * 0.55 + max(0, min(1, level)) * 0.45
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        halo.opacity = 0.2 + haloLevel * 0.9
-        let scale = CGFloat(1.0 + haloLevel * 0.35)
-        halo.transform = CATransform3DMakeScale(scale, scale, 1)
+        halo.alphaValue = CGFloat(0.15 + haloLevel * 0.85)
+        let scale = CGFloat(1.0 + haloLevel * 0.55)
+        layer.transform = CATransform3DMakeScale(scale, scale, 1)
         CATransaction.commit()
     }
 
     private func startPulsingDot() {
-        // Baseline slow heartbeat when audio is silent so it still feels alive.
+        haloActive = true
+        // Baseline slow heartbeat whenever audio is silent so the dot keeps
+        // signalling "recording" even during speech pauses.
         pulseTimer?.invalidate()
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.85, repeats: true) { [weak self] _ in
-            guard let self = self, self.haloLevel < 0.05 else { return }
-            guard let halo = self.haloLayer() else { return }
-            let anim = CABasicAnimation(keyPath: "opacity")
-            anim.fromValue = 0.15
-            anim.toValue = 0.4
-            anim.duration = 0.42
-            anim.autoreverses = true
-            anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            halo.add(anim, forKey: "idlePulse")
+        pulseTimer = Timer.scheduledTimer(withTimeInterval: 1.1, repeats: true) { [weak self] _ in
+            guard let self = self, self.haloActive, self.haloLevel < 0.08 else { return }
+            guard let halo = self.statusDotHalo, let layer = halo.layer else { return }
+            let alphaAnim = CABasicAnimation(keyPath: "opacity")
+            alphaAnim.fromValue = 0.15
+            alphaAnim.toValue = 0.55
+            alphaAnim.duration = 0.55
+            alphaAnim.autoreverses = true
+            alphaAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(alphaAnim, forKey: "idlePulseOpacity")
         }
     }
 
     private func stopPulsingDot() {
+        haloActive = false
         pulseTimer?.invalidate()
         pulseTimer = nil
         statusDot.alphaValue = 1.0
-        haloLayer()?.removeAllAnimations()
+        statusDotHalo?.layer?.removeAllAnimations()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        haloLayer()?.opacity = 0
-        haloLayer()?.transform = CATransform3DIdentity
+        statusDotHalo?.alphaValue = 0
+        statusDotHalo?.layer?.transform = CATransform3DIdentity
         CATransaction.commit()
         haloLevel = 0
     }
