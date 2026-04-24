@@ -459,47 +459,146 @@ struct CustomModeRow: View {
     @Binding var mode: [String: String]
     var onDelete: () -> Void
 
+    @State private var showPromptSheet = false
+
     private let iconChoices = ["star", "envelope", "doc.text", "globe", "hammer", "wrench", "lightbulb", "book", "pencil", "text.bubble", "brain.head.profile", "list.bullet"]
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { (mode["enabled"] ?? "true") == "true" },
+            set: { mode["enabled"] = $0 ? "true" : "false" }
+        )
+    }
+    private var nameBinding: Binding<String> {
+        Binding(get: { mode["name"] ?? "" }, set: { mode["name"] = $0 })
+    }
+    private var iconBinding: Binding<String> {
+        Binding(get: { mode["icon"] ?? "star" }, set: { mode["icon"] = $0 })
+    }
+    private var promptBinding: Binding<String> {
+        Binding(get: { mode["prompt"] ?? "" }, set: { mode["prompt"] = $0 })
+    }
 
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Toggle("Enabled", isOn: Binding(
-                        get: { (mode["enabled"] ?? "true") == "true" },
-                        set: { mode["enabled"] = $0 ? "true" : "false" }
-                    ))
-                    .toggleStyle(.checkbox)
+            VStack(alignment: .leading, spacing: 12) {
+                // Row 1 — metadata: enable toggle, name, icon, delete
+                HStack(spacing: 10) {
+                    Toggle("", isOn: enabledBinding)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .help(enabledBinding.wrappedValue ? "Mode enabled" : "Mode disabled")
 
-                    TextField("Name", text: Binding(
-                        get: { mode["name"] ?? "" },
-                        set: { mode["name"] = $0 }
-                    ))
+                    TextField("Mode name", text: nameBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 240)
 
-                    Picker("", selection: Binding(
-                        get: { mode["icon"] ?? "star" },
-                        set: { mode["icon"] = $0 }
-                    )) {
+                    Picker("", selection: iconBinding) {
                         ForEach(iconChoices, id: \.self) { icon in
                             Label(icon, systemImage: icon).tag(icon)
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 120)
+                    .frame(width: 110)
+
+                    Spacer()
 
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.borderless)
+                    .help("Delete this custom mode")
                 }
-                TextField("System prompt", text: Binding(
-                    get: { mode["prompt"] ?? "" },
-                    set: { mode["prompt"] = $0 }
-                ), axis: .vertical)
-                .lineLimit(3...10)
+
+                // Row 2 — system prompt, clearly labeled, framed, with an "expand" button
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("System prompt")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(promptBinding.wrappedValue.count) chars")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showPromptSheet = true
+                        } label: {
+                            Label("Expand", systemImage: "arrow.up.left.and.arrow.down.right")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Open full-screen editor")
+                    }
+
+                    TextEditor(text: promptBinding)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 110, maxHeight: 180)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        )
+                        .cornerRadius(6)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .sheet(isPresented: $showPromptSheet) {
+            PromptEditorSheet(
+                modeName: nameBinding.wrappedValue.isEmpty ? "Untitled mode" : nameBinding.wrappedValue,
+                prompt: promptBinding,
+                isPresented: $showPromptSheet
+            )
+        }
+    }
+}
+
+/// Full-height sheet editor for a mode's system prompt — much easier to iterate
+/// on long prompts than the inline TextEditor.
+struct PromptEditorSheet: View {
+    let modeName: String
+    @Binding var prompt: String
+    @Binding var isPresented: Bool
+    @State private var draft: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("System prompt").font(.headline)
+                    Text(modeName).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(draft.count) chars").font(.caption).foregroundStyle(.secondary)
+            }
+
+            TextEditor(text: $draft)
                 .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 560, minHeight: 360)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+                .cornerRadius(8)
+
+            Text("Tip: start with \u{201C}Réponds UNIQUEMENT avec le texte, sans préambule\u{201D} to avoid the LLM prefixing its answer.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { isPresented = false }
+                Button("Apply") {
+                    prompt = draft
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
             }
         }
+        .padding(20)
+        .onAppear { draft = prompt }
     }
 }
 
