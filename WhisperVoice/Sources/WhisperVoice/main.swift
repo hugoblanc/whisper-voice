@@ -2367,6 +2367,8 @@ class ShortcutRecorderView: NSView {
     var keyCode: UInt32
     var modifiers: UInt32
     var allowsBareKeys: Bool
+    /// Fired after the user records a new combo so SwiftUI bindings update.
+    var onChange: ((UInt32, UInt32) -> Void)?
 
     init(keyCode: UInt32, modifiers: UInt32, allowsBareKeys: Bool = true) {
         self.keyCode = keyCode
@@ -2424,6 +2426,7 @@ class ShortcutRecorderView: NSView {
             }
             self.keyCode = UInt32(event.keyCode)
             self.modifiers = mods
+            self.onChange?(self.keyCode, self.modifiers)
             self.stopRecording()
             return nil
         }
@@ -2437,7 +2440,7 @@ class ShortcutRecorderView: NSView {
         updateDisplay()
     }
 
-    private func updateDisplay() {
+    func updateDisplay() {
         let combo = modifiersToString(modifiers) + (modifiers != 0 ? " " : "") + keyCodeToString(keyCode)
         label.stringValue = combo
     }
@@ -3470,7 +3473,7 @@ class ContextCapturer {
 
 // MARK: - Projects
 
-struct Project: Codable {
+struct Project: Codable, Identifiable {
     let id: UUID
     var name: String
     var color: String?
@@ -6525,7 +6528,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionWizard: PermissionWizard?
 
     // Preferences window
-    private var preferencesWindow: PreferencesWindow?
+    private var preferencesWindow: PreferencesWindow?          // Legacy AppKit; kept as fallback
+    private var swiftUIPreferencesWindow: SwiftUIPreferencesWindow?
 
     // Recording window (waveform display)
     private var recordingWindow: RecordingWindow?
@@ -7596,13 +7600,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showPreferences() {
-        if preferencesWindow == nil {
-            preferencesWindow = PreferencesWindow()
-            preferencesWindow?.onSettingsChanged = { [weak self] in
+        if swiftUIPreferencesWindow == nil {
+            swiftUIPreferencesWindow = SwiftUIPreferencesWindow()
+            swiftUIPreferencesWindow?.onSettingsChanged = { [weak self] in
                 self?.reloadSettings()
             }
         }
-        preferencesWindow?.show()
+        swiftUIPreferencesWindow?.show()
     }
 
     private func reloadSettings() {
