@@ -82,21 +82,31 @@ if [ -f "$PROJECT_DIR/Resources/whisper-server" ]; then
     echo -e "  ${GREEN}+${NC} whisper-server included"
 fi
 
-# Sign the app with Developer ID certificate + entitlements
+# Sign the app with Developer ID certificate + entitlements.
+# NOTE: --timestamp is critical for notarization — Apple refuses submissions
+# that don't have a secure Apple-signed timestamp embedded in the signature.
 ENTITLEMENTS_PATH="$PROJECT_DIR/WhisperVoice.entitlements"
 DEVELOPER_ID=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
 if [ -n "$DEVELOPER_ID" ]; then
     echo -e "Signing with: ${YELLOW}$DEVELOPER_ID${NC}"
     if [ -f "$ENTITLEMENTS_PATH" ]; then
-        codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS_PATH" --sign "$DEVELOPER_ID" "$APP_PATH"
+        codesign --force --deep --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS_PATH" \
+            --sign "$DEVELOPER_ID" "$APP_PATH"
     else
         echo -e "${RED}Warning: $ENTITLEMENTS_PATH not found — signing without entitlements (mic/AppleScript may fail)${NC}"
-        codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_PATH"
+        codesign --force --deep --options runtime --timestamp --sign "$DEVELOPER_ID" "$APP_PATH"
     fi
 else
-    echo -e "${YELLOW}Warning: Developer ID not found, using ad-hoc signing${NC}"
+    echo -e "${YELLOW}Warning: Developer ID not found, using ad-hoc signing (NOT distributable)${NC}"
     codesign --force --deep --sign - "$APP_PATH"
 fi
+
+# Verify signing is valid before we even think about notarizing.
+codesign --verify --deep --strict --verbose=2 "$APP_PATH" || {
+    echo -e "${RED}codesign verification failed — aborting${NC}"
+    exit 1
+}
 
 echo -e "${GREEN}OK${NC}"
 echo ""
@@ -123,13 +133,70 @@ hdiutil create -volname "$APP_NAME" \
     -ov -format UDZO \
     "$BUILD_DIR/$DMG_NAME"
 
-cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-AppleSilicon.dmg"
-cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-Intel.dmg"
-
-# Cleanup
+# Cleanup temp before notarization so only the DMG remains
 rm -rf "$DMG_TEMP"
 
 echo -e "${GREEN}OK${NC}"
+echo ""
+
+# ────────────────────────────────────────────────────────────────────────────
+# Notarization + stapling
+# ────────────────────────────────────────────────────────────────────────────
+# macOS Gatekeeper rejects unnotarized apps with "cannot be opened because the
+# developer cannot be verified" — and for downloads with the quarantine flag,
+# the app gets MOVED TO TRASH on open. Notarization is how Apple scans + signs
+# off on the bundle. Stapling embeds the notary ticket so offline installs work.
+#
+# Requires credentials stored once via:
+#   xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+#       --apple-id <email> --team-id 3V5QFA3LEY --password <app-specific-pwd>
+NOTARY_PROFILE="whispervoice-notary"
+
+echo -e "${YELLOW}[+]${NC} Notarizing DMG with Apple (this usually takes 1-3 minutes)..."
+if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" &>/dev/null; then
+    echo -e "${RED}Notarization credentials not found for profile '$NOTARY_PROFILE'.${NC}"
+    echo -e "${YELLOW}Run this once to set them up:${NC}"
+    echo ""
+    echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" \\"
+    echo "      --apple-id <your-apple-id-email> \\"
+    echo "      --team-id 3V5QFA3LEY \\"
+    echo "      --password <app-specific-password from appleid.apple.com>"
+    echo ""
+    echo -e "${YELLOW}Skipping notarization. The DMG is signed but will be rejected by Gatekeeper on other Macs.${NC}"
+    SKIP_NOTARIZATION=1
+else
+    SKIP_NOTARIZATION=0
+    SUBMIT_OUTPUT=$(xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
+        --keychain-profile "$NOTARY_PROFILE" \
+        --wait 2>&1)
+    echo "$SUBMIT_OUTPUT"
+
+    STATUS=$(echo "$SUBMIT_OUTPUT" | awk '/status:/ {print $2}' | tail -1)
+    if [ "$STATUS" != "Accepted" ]; then
+        echo -e "${RED}Notarization failed (status: $STATUS). Run this for details:${NC}"
+        SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | awk '/id:/ {print $2}' | head -1)
+        echo "  xcrun notarytool log $SUBMISSION_ID --keychain-profile $NOTARY_PROFILE"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}[+]${NC} Stapling notarization ticket to the DMG..."
+    xcrun stapler staple "$BUILD_DIR/$DMG_NAME" || {
+        echo -e "${RED}Stapling failed${NC}"
+        exit 1
+    }
+    echo -e "${GREEN}OK${NC} — Gatekeeper will now accept the DMG offline"
+fi
+
+# Duplicate the notarized + stapled DMG to arch-named copies for GitHub URLs.
+# Both are the same universal artifact so no need to re-notarize.
+cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-AppleSilicon.dmg"
+cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-Intel.dmg"
+
+# Final Gatekeeper assessment so the user sees it PASS (or why it didn't).
+echo ""
+echo -e "${YELLOW}[+]${NC} Final Gatekeeper check:"
+spctl -a -vv --type open --context context:primary-signature \
+    "$BUILD_DIR/$DMG_NAME" 2>&1 || true
 echo ""
 
 echo -e "${GREEN}${BOLD}"
@@ -139,6 +206,9 @@ echo "========================================"
 echo -e "${NC}"
 echo ""
 echo -e "DMG created at: ${CYAN}$BUILD_DIR/$DMG_NAME${NC}"
+if [ "$SKIP_NOTARIZATION" = "1" ]; then
+    echo -e "${RED}⚠ Not notarized — users on other Macs will see Gatekeeper warnings.${NC}"
+fi
 echo ""
 echo "To install:"
 echo "  1. Open the DMG"

@@ -104,6 +104,30 @@ Add **Whisper Voice** in System Settings → Privacy & Security:
 2. **Accessibility**: For paste simulation (Cmd+V)
 3. **Input Monitoring**: For global hotkey detection
 
+## ⚠️ Distribution: Signing + Notarization — READ BEFORE SHIPPING
+
+**Signing alone is NOT enough.** macOS Gatekeeper rejects unnotarized Developer ID apps downloaded from the web — users see *"cannot be opened because the developer cannot be verified"* and for quarantined downloads the app gets **moved to Trash on open**. Every shipped DMG must be:
+
+1. **Signed** with Developer ID Application + `--options runtime` + `--timestamp` + entitlements
+2. **Notarized** via `xcrun notarytool submit ... --wait` (uploads to Apple, usually 1–3 min)
+3. **Stapled** via `xcrun stapler staple <dmg>` so offline installs work
+
+`build-dmg.sh` does all three automatically, but needs notary credentials stored once:
+
+```bash
+xcrun notarytool store-credentials "whispervoice-notary" \
+    --apple-id <email> --team-id 3V5QFA3LEY \
+    --password <app-specific-password from appleid.apple.com>
+```
+
+Verify a DMG is Gatekeeper-clean before uploading to GitHub:
+```bash
+spctl -a -vv --type open --context context:primary-signature build/WhisperVoice-*.dmg
+# Expect: "accepted" source="Notarized Developer ID"
+```
+
+If you see `source=Unnotarized Developer ID` → the DMG will reject on users' Macs. Re-run `build-dmg.sh` with credentials set up.
+
 ## ⚠️ Signing & Entitlements — READ BEFORE REBUILDING
 
 The app uses **Hardened Runtime** (`codesign --options runtime`). Without an entitlements file, macOS silently denies microphone access — `AVCaptureDevice.authorizationStatus` returns `.denied` immediately, no system prompt fires, and **no amount of `tccutil reset` will fix it**. The block is at the signature layer, not TCC.
