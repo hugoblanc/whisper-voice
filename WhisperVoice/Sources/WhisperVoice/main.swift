@@ -2817,12 +2817,22 @@ class TextProcessor {
 
 // MARK: - Mode Selector View
 
+extension Notification.Name {
+    /// Fired when the selected mode changes so the parent repositions the
+    /// "⇧ switch" hint that sits to the right of the selector.
+    static let modeSelectorLayoutChanged = Notification.Name("com.whisper-voice.modeSelectorLayoutChanged")
+}
+
 class ModeSelectorView: NSView {
     private var modeViews: [NSView] = []
     private var modeLabels: [NSTextField] = []
-    private var hintLabel: NSTextField!
 
     var onModeChanged: ((Int) -> Void)?
+
+    /// Computed trailing edge of the last mode cell. Used by the parent window
+    /// to lay out the "⇧ switch" hint outside the selector so it doesn't look
+    /// like another (disabled) mode.
+    private(set) var modesTrailingX: CGFloat = 0
 
     private let expandedWidth: CGFloat = 90
     private let collapsedWidth: CGFloat = 32
@@ -2847,7 +2857,6 @@ class ModeSelectorView: NSView {
         layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
 
         let modes = ModeManager.shared.modes
-        let hasOpenAI = ModeManager.shared.hasOpenAIKey
         var xOffset: CGFloat = 8
 
         for (index, mode) in modes.enumerated() {
@@ -2894,13 +2903,13 @@ class ModeSelectorView: NSView {
             xOffset += width + spacing
         }
 
-        // Hint label - show different message if no OpenAI key
-        let hintText = hasOpenAI ? "⇧ switch" : "⇧ (need OpenAI key)"
-        hintLabel = NSTextField(labelWithString: hintText)
-        hintLabel.font = NSFont.systemFont(ofSize: 9, weight: .regular)
-        hintLabel.textColor = hasOpenAI ? .white.withAlphaComponent(0.4) : .systemOrange.withAlphaComponent(0.7)
-        hintLabel.frame = NSRect(x: xOffset + 4, y: 11, width: hasOpenAI ? 50 : 110, height: 12)
-        addSubview(hintLabel)
+        // Trailing edge of the last mode cell — parent window places the
+        // "⇧ switch" hint to the right of this, OUTSIDE our rounded container,
+        // so it doesn't look like another (disabled) mode.
+        modesTrailingX = xOffset
+        var f = frame
+        f.size.width = xOffset + 4
+        frame = f
     }
 
     func updateSelection(animated: Bool = true) {
@@ -2917,18 +2926,15 @@ class ModeSelectorView: NSView {
                 container.frame = NSRect(x: xOffset, y: 4, width: width, height: self.itemHeight)
                 container.alphaValue = isAvailable ? 1.0 : 0.35
                 container.layer?.backgroundColor = isSelected && isAvailable
-                    ? NSColor.white.withAlphaComponent(0.22).cgColor
+                    ? NSColor.white.withAlphaComponent(0.24).cgColor
                     : NSColor.clear.cgColor
-                container.layer?.borderWidth = (isSelected && isAvailable) ? 0.5 : 0
-                container.layer?.borderColor = (isSelected && isAvailable)
-                    ? NSColor.white.withAlphaComponent(0.35).cgColor
-                    : NSColor.clear.cgColor
+                container.layer?.borderWidth = 0
 
                 // Update icon position and color
                 if let iconView = container.subviews.first as? NSImageView {
                     let iconX: CGFloat = isSelected ? 8 : (width - 16) / 2
                     iconView.frame.origin.x = iconX
-                    iconView.contentTintColor = isSelected && isAvailable ? .white : .white.withAlphaComponent(0.6)
+                    iconView.contentTintColor = isSelected && isAvailable ? .white : .white.withAlphaComponent(0.55)
                 }
 
                 // Update label visibility
@@ -2937,8 +2943,9 @@ class ModeSelectorView: NSView {
                 xOffset += width + self.spacing
             }
 
-            // Update hint position
-            self.hintLabel.frame.origin.x = xOffset + 4
+            self.modesTrailingX = xOffset
+            // Let the parent reposition its own hint relative to us.
+            NotificationCenter.default.post(name: .modeSelectorLayoutChanged, object: self)
         }
 
         if animated {
@@ -4867,6 +4874,7 @@ class RecordingWindow: NSObject {
     private var modeSelector: ModeSelectorView!
     private var projectChip: ProjectChipView!
     private var autoModeLabel: NSTextField!
+    private var modeSwitchHint: NSTextField!
     private var projectPicker: NSPopover?
 
     /// Called when user picks a different project (or nil = untag) for the
@@ -4956,12 +4964,12 @@ class RecordingWindow: NSObject {
 
         // Status row: dot + label + timer
         // Halo is a sibling of the dot (not a sublayer) so it isn't clipped by
-        // the dot's corner-radius masking. Centered on the dot, larger (28x28),
-        // tied to live audio level via updateStatusDotHalo.
-        statusDotHalo = NSView(frame: NSRect(x: 7, y: 141, width: 28, height: 28))
+        // the dot's corner-radius masking. Kept small (18x18) and subtle —
+        // earlier iterations at 28x28 felt bloated relative to the 10px dot.
+        statusDotHalo = NSView(frame: NSRect(x: 12, y: 146, width: 18, height: 18))
         statusDotHalo.wantsLayer = true
-        statusDotHalo.layer?.cornerRadius = 14
-        statusDotHalo.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.5).cgColor
+        statusDotHalo.layer?.cornerRadius = 9
+        statusDotHalo.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.45).cgColor
         statusDotHalo.alphaValue = 0
         contentView.addSubview(statusDotHalo)
 
@@ -4984,13 +4992,27 @@ class RecordingWindow: NSObject {
         timerLabel.alignment = .right
         contentView.addSubview(timerLabel)
 
-        // Mode selector
-        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 106, width: 336, height: 36))
+        // Mode selector — container width now matches the modes only. The
+        // "⇧ switch" hint is a separate sibling label (modeSwitchHint)
+        // positioned to the right, so it doesn't look like a disabled mode.
+        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 106, width: 260, height: 36))
         modeSelector.onModeChanged = { [weak self] index in
             let mode = ModeManager.shared.modes[index]
             self?.onModeChanged?(mode)
         }
         contentView.addSubview(modeSelector)
+
+        modeSwitchHint = NSTextField(labelWithString: "")
+        modeSwitchHint.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+        modeSwitchHint.textColor = NSColor.white.withAlphaComponent(0.38)
+        modeSwitchHint.frame = NSRect(x: 0, y: 114, width: 90, height: 14)
+        contentView.addSubview(modeSwitchHint)
+        refreshModeSwitchHint()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleModeSelectorLayoutChanged),
+            name: .modeSelectorLayoutChanged, object: nil
+        )
 
         // Auto-mode reason label (muted, hidden unless auto-selection kicked in)
         autoModeLabel = NSTextField(labelWithString: "")
@@ -5115,14 +5137,14 @@ class RecordingWindow: NSObject {
     private var haloActive: Bool = false
 
     /// Smoothed alpha + subtle scale modulation of the halo based on input audio.
+    /// Kept very subtle — max ~1.2x scale and 0.7 alpha so it never dominates.
     private func updateStatusDotHalo(level: Float) {
         guard haloActive, let halo = statusDotHalo, let layer = halo.layer else { return }
-        // Ease toward the new level so the halo doesn't jitter.
         haloLevel = haloLevel * 0.55 + max(0, min(1, level)) * 0.45
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        halo.alphaValue = CGFloat(0.15 + haloLevel * 0.85)
-        let scale = CGFloat(1.0 + haloLevel * 0.55)
+        halo.alphaValue = CGFloat(0.1 + haloLevel * 0.6)
+        let scale = CGFloat(1.0 + haloLevel * 0.22)
         layer.transform = CATransform3DMakeScale(scale, scale, 1)
         CATransaction.commit()
     }
@@ -5161,6 +5183,25 @@ class RecordingWindow: NSObject {
 
     private func playSound(named name: String) {
         NSSound(named: name)?.play()
+    }
+
+    /// Position the "⇧ switch" hint relative to the selector's trailing edge.
+    @objc private func handleModeSelectorLayoutChanged() {
+        refreshModeSwitchHint()
+    }
+
+    private func refreshModeSwitchHint() {
+        guard let selector = modeSelector, let hint = modeSwitchHint else { return }
+        let hasOpenAI = ModeManager.shared.hasOpenAIKey
+        let hintText = hasOpenAI ? "⇧ switch" : "⇧ (need OpenAI key)"
+        hint.stringValue = hintText
+        hint.textColor = hasOpenAI ? NSColor.white.withAlphaComponent(0.38) : NSColor.systemOrange.withAlphaComponent(0.7)
+        hint.sizeToFit()
+
+        // Trailing edge of the selector (in our content coords) + gap.
+        let hintX = selector.frame.minX + selector.modesTrailingX + 16
+        let y = selector.frame.minY + (selector.frame.height - hint.frame.height) / 2
+        hint.frame.origin = NSPoint(x: hintX, y: y)
     }
 
     @objc private func stopClicked() {
