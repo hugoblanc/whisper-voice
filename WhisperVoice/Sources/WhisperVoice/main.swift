@@ -2841,8 +2841,10 @@ class ModeSelectorView: NSView {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
 
         let modes = ModeManager.shared.modes
         let hasOpenAI = ModeManager.shared.hasOpenAIKey
@@ -2856,11 +2858,15 @@ class ModeSelectorView: NSView {
             // Container for each mode
             let container = NSView(frame: NSRect(x: xOffset, y: 4, width: width, height: itemHeight))
             container.wantsLayer = true
-            container.layer?.cornerRadius = 6
+            container.layer?.cornerRadius = 8
             container.alphaValue = isAvailable ? 1.0 : 0.35
 
             if isSelected && isAvailable {
-                container.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
+                // Active state uses the system accent color — matches macOS Tahoe
+                // capsule selection style, reads as clearly "this is active".
+                container.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
+                container.layer?.borderWidth = 0.5
+                container.layer?.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
             }
 
             // Icon
@@ -2911,7 +2917,11 @@ class ModeSelectorView: NSView {
                 container.frame = NSRect(x: xOffset, y: 4, width: width, height: self.itemHeight)
                 container.alphaValue = isAvailable ? 1.0 : 0.35
                 container.layer?.backgroundColor = isSelected && isAvailable
-                    ? NSColor.white.withAlphaComponent(0.15).cgColor
+                    ? NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
+                    : NSColor.clear.cgColor
+                container.layer?.borderWidth = (isSelected && isAvailable) ? 0.5 : 0
+                container.layer?.borderColor = (isSelected && isAvailable)
+                    ? NSColor.white.withAlphaComponent(0.25).cgColor
                     : NSColor.clear.cgColor
 
                 // Update icon position and color
@@ -4726,14 +4736,127 @@ class WaveformView: NSView {
 
 // MARK: - Recording Window
 
+// MARK: - Capsule action button
+
+/// Pill-shaped, translucent action button that plays nicer with the glass
+/// RecordingWindow background than NSButton(bezelStyle: .rounded).
+/// - Translucent fill + 1px stroke + optional accent-tinted primary variant.
+/// - Hover lifts the fill slightly; mouseDown taps it darker.
+/// - Ties into the window's default/escape key equivalents via keyEquivalent.
+final class CapsuleButton: NSView {
+    var onClick: (() -> Void)?
+    /// Matching NSButton semantics so \r / Esc still close the panel.
+    var keyEquivalent: String = ""
+
+    private let titleField = NSTextField(labelWithString: "")
+    private let iconView = NSImageView()
+    private var isPrimary: Bool
+    private var isDestructive: Bool
+    private var isHovering: Bool = false { didSet { refreshStyle() } }
+    private var isPressed: Bool = false { didSet { refreshStyle() } }
+
+    init(title: String, symbol: String? = nil, isPrimary: Bool = false, isDestructive: Bool = false) {
+        self.isPrimary = isPrimary
+        self.isDestructive = isDestructive
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        titleField.stringValue = title
+        titleField.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleField.textColor = isPrimary ? .white : NSColor.white.withAlphaComponent(0.9)
+        titleField.alignment = .center
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleField)
+
+        if let symbol = symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title) {
+            iconView.image = image
+            iconView.contentTintColor = titleField.textColor
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(iconView)
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: 13),
+                iconView.heightAnchor.constraint(equalToConstant: 13),
+                titleField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
+                titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        }
+        refreshStyle()
+        updateTrackingAreas()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2   // fully pill
+    }
+
+    private func refreshStyle() {
+        layer?.borderWidth = 1
+        if isPrimary {
+            let base = NSColor.controlAccentColor
+            layer?.backgroundColor = base.withAlphaComponent(isPressed ? 0.85 : (isHovering ? 0.95 : 0.9)).cgColor
+            layer?.borderColor = base.withAlphaComponent(0.3).cgColor
+        } else if isDestructive {
+            let base = NSColor.systemRed
+            layer?.backgroundColor = base.withAlphaComponent(isPressed ? 0.35 : (isHovering ? 0.25 : 0.15)).cgColor
+            layer?.borderColor = base.withAlphaComponent(0.5).cgColor
+        } else {
+            let fill = isPressed ? 0.18 : (isHovering ? 0.14 : 0.08)
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(CGFloat(fill)).cgColor
+            layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovering = true }
+    override func mouseExited(with event: NSEvent) { isHovering = false; isPressed = false }
+    override func mouseDown(with event: NSEvent) { isPressed = true }
+    override func mouseUp(with event: NSEvent) {
+        let wasPressed = isPressed
+        isPressed = false
+        if wasPressed && bounds.contains(convert(event.locationInWindow, from: nil)) {
+            onClick?()
+        }
+    }
+
+    /// Let the window's key event machinery trigger us via Return / Escape.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if !keyEquivalent.isEmpty, event.charactersIgnoringModifiers == keyEquivalent {
+            onClick?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+// MARK: - Recording Window
+
 class RecordingWindow: NSObject {
     private var window: NSPanel!
     private var waveformView: WaveformView!
     private var statusDot: NSView!
     private var statusLabel: NSTextField!
     private var timerLabel: NSTextField!
-    private var stopButton: NSButton!
-    private var cancelButton: NSButton!
+    private var cancelCapsuleButton: CapsuleButton?
+    private var stopCapsuleButton: CapsuleButton?
     private var modeSelector: ModeSelectorView!
     private var projectChip: ProjectChipView!
     private var autoModeLabel: NSTextField!
@@ -4763,7 +4886,10 @@ class RecordingWindow: NSObject {
     }
 
     private func setupWindow() {
-        // Create floating panel — taller to fit mode selector, auto-mode label, and project chip.
+        // Floating panel — Liquid-Glass-style: transparent chrome + NSVisualEffectView
+        // fills the content rect to let wallpaper / apps bleed through (like Control
+        // Center). Falls back gracefully on older macOS versions since material types
+        // are available since 10.14.
         window = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 360, height: 234),
             styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
@@ -4777,12 +4903,43 @@ class RecordingWindow: NSObject {
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isOpaque = false
-        window.backgroundColor = NSColor(white: 0.08, alpha: 0.95)
+        window.backgroundColor = .clear
         window.hasShadow = true
 
         guard let contentView = window.contentView else { return }
         contentView.wantsLayer = true
-        contentView.layer?.cornerRadius = 14
+        contentView.layer?.cornerRadius = 20
+        contentView.layer?.masksToBounds = true
+
+        // Translucent material base — the "glass" layer.
+        let effect = NSVisualEffectView(frame: contentView.bounds)
+        effect.autoresizingMask = [.width, .height]
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 20
+        effect.layer?.masksToBounds = true
+        contentView.addSubview(effect, positioned: .below, relativeTo: nil)
+
+        // Dark tint layered on top of the blur so the content stays readable
+        // even on bright wallpapers without killing the translucency effect.
+        let tint = NSView(frame: contentView.bounds)
+        tint.autoresizingMask = [.width, .height]
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor(white: 0.04, alpha: 0.55).cgColor
+        contentView.addSubview(tint, positioned: .above, relativeTo: effect)
+
+        // Glass highlight: thin 1px stroke on the full perimeter for a refracted
+        // edge feel. Inset by 0.5 so the stroke is pixel-aligned inside the bounds.
+        let highlight = CAShapeLayer()
+        let strokeRect = contentView.bounds.insetBy(dx: 0.5, dy: 0.5)
+        highlight.frame = contentView.bounds
+        highlight.path = CGPath(roundedRect: strokeRect, cornerWidth: 19.5, cornerHeight: 19.5, transform: nil)
+        highlight.lineWidth = 1
+        highlight.strokeColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        highlight.fillColor = NSColor.clear.cgColor
+        contentView.layer?.addSublayer(highlight)
 
         // Waveform view at top (below title bar area)
         waveformView = WaveformView(frame: NSRect(x: 16, y: 174, width: 328, height: 45))
@@ -4793,18 +4950,26 @@ class RecordingWindow: NSObject {
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
         statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        // Outer "halo" layer that pulses with audio — stronger glow when speaking.
+        let dotHalo = CALayer()
+        dotHalo.frame = CGRect(x: -6, y: -6, width: 22, height: 22)
+        dotHalo.cornerRadius = 11
+        dotHalo.backgroundColor = NSColor.systemRed.withAlphaComponent(0.35).cgColor
+        dotHalo.opacity = 0
+        dotHalo.name = "halo"
+        statusDot.layer?.addSublayer(dotHalo)
         contentView.addSubview(statusDot)
 
         statusLabel = NSTextField(labelWithString: "Recording")
         statusLabel.frame = NSRect(x: 32, y: 147, width: 120, height: 18)
-        statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         statusLabel.textColor = .white
         contentView.addSubview(statusLabel)
 
         timerLabel = NSTextField(labelWithString: "0:00")
         timerLabel.frame = NSRect(x: 290, y: 147, width: 55, height: 18)
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        timerLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        timerLabel.textColor = NSColor.white.withAlphaComponent(0.65)
         timerLabel.alignment = .right
         contentView.addSubview(timerLabel)
 
@@ -4820,7 +4985,7 @@ class RecordingWindow: NSObject {
         autoModeLabel = NSTextField(labelWithString: "")
         autoModeLabel.frame = NSRect(x: 16, y: 84, width: 328, height: 16)
         autoModeLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        autoModeLabel.textColor = NSColor.white.withAlphaComponent(0.45)
+        autoModeLabel.textColor = NSColor.white.withAlphaComponent(0.55)
         autoModeLabel.alignment = .center
         autoModeLabel.isHidden = true
         contentView.addSubview(autoModeLabel)
@@ -4830,23 +4995,22 @@ class RecordingWindow: NSObject {
         projectChip.onClick = { [weak self] in self?.showProjectPicker() }
         contentView.addSubview(projectChip)
 
-        // Cancel button
-        cancelButton = NSButton(frame: NSRect(x: 16, y: 12, width: 80, height: 28))
-        cancelButton.title = "Cancel"
-        cancelButton.bezelStyle = .rounded
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelClicked)
-        cancelButton.keyEquivalent = "\u{1b}"  // Escape key
-        contentView.addSubview(cancelButton)
+        // Capsule action buttons — custom views for a pill shape and translucent fill
+        // that play nicer with the glass background than NSButton(bezelStyle: .rounded).
+        let cancelCapsule = CapsuleButton(title: "Cancel", symbol: "xmark", isDestructive: false)
+        cancelCapsule.frame = NSRect(x: 16, y: 10, width: 96, height: 32)
+        cancelCapsule.onClick = { [weak self] in self?.cancelClicked() }
+        cancelCapsule.keyEquivalent = "\u{1b}"
+        contentView.addSubview(cancelCapsule)
 
-        // Stop button
-        stopButton = NSButton(frame: NSRect(x: 264, y: 12, width: 80, height: 28))
-        stopButton.title = "Stop"
-        stopButton.bezelStyle = .rounded
-        stopButton.target = self
-        stopButton.action = #selector(stopClicked)
-        stopButton.keyEquivalent = "\r"  // Enter key
-        contentView.addSubview(stopButton)
+        let stopCapsule = CapsuleButton(title: "Stop", symbol: "stop.fill", isPrimary: true)
+        stopCapsule.frame = NSRect(x: 248, y: 10, width: 96, height: 32)
+        stopCapsule.onClick = { [weak self] in self?.stopClicked() }
+        stopCapsule.keyEquivalent = "\r"
+        contentView.addSubview(stopCapsule)
+
+        self.cancelCapsuleButton = cancelCapsule
+        self.stopCapsuleButton = stopCapsule
     }
 
     func show() {
@@ -4921,6 +5085,9 @@ class RecordingWindow: NSObject {
         // Update waveform with current audio level
         if let level = audioLevelProvider?() {
             waveformView.addLevel(level)
+            // Drive the halo glow around the status dot with the same audio level —
+            // gives a "breathing, alive" feel that reacts to speech.
+            updateStatusDotHalo(level: level)
         }
 
         // Update timer
@@ -4933,20 +5100,38 @@ class RecordingWindow: NSObject {
     }
 
     private var pulseTimer: Timer?
+    private var haloLevel: Float = 0
+
+    private func haloLayer() -> CALayer? {
+        statusDot.layer?.sublayers?.first(where: { $0.name == "halo" })
+    }
+
+    /// Smoothed opacity + subtle scale modulation of the halo based on input audio.
+    private func updateStatusDotHalo(level: Float) {
+        // Ease toward the new level so the halo doesn't jitter.
+        haloLevel = haloLevel * 0.6 + max(0, min(1, level)) * 0.4
+        guard let halo = haloLayer() else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        halo.opacity = 0.2 + haloLevel * 0.9
+        let scale = CGFloat(1.0 + haloLevel * 0.35)
+        halo.transform = CATransform3DMakeScale(scale, scale, 1)
+        CATransaction.commit()
+    }
 
     private func startPulsingDot() {
+        // Baseline slow heartbeat when audio is silent so it still feels alive.
         pulseTimer?.invalidate()
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
-            guard let dot = self?.statusDot else { return }
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.4
-                dot.animator().alphaValue = 0.3
-            }, completionHandler: {
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 0.4
-                    dot.animator().alphaValue = 1.0
-                })
-            })
+        pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.85, repeats: true) { [weak self] _ in
+            guard let self = self, self.haloLevel < 0.05 else { return }
+            guard let halo = self.haloLayer() else { return }
+            let anim = CABasicAnimation(keyPath: "opacity")
+            anim.fromValue = 0.15
+            anim.toValue = 0.4
+            anim.duration = 0.42
+            anim.autoreverses = true
+            anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            halo.add(anim, forKey: "idlePulse")
         }
     }
 
@@ -4954,6 +5139,13 @@ class RecordingWindow: NSObject {
         pulseTimer?.invalidate()
         pulseTimer = nil
         statusDot.alphaValue = 1.0
+        haloLayer()?.removeAllAnimations()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        haloLayer()?.opacity = 0
+        haloLayer()?.transform = CATransform3DIdentity
+        CATransaction.commit()
+        haloLevel = 0
     }
 
     private func playSound(named name: String) {
