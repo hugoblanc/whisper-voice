@@ -12,7 +12,7 @@ BOLD='\033[1m'
 
 # Config
 APP_NAME="Whisper Voice"
-VERSION="3.6.0"
+VERSION="3.6.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/WhisperVoice"
 BUILD_DIR="$SCRIPT_DIR/build"
@@ -133,6 +133,13 @@ hdiutil create -volname "$APP_NAME" \
     -ov -format UDZO \
     "$BUILD_DIR/$DMG_NAME"
 
+# Sign the DMG itself so `spctl --type install` and Gatekeeper have a
+# signature to chain-verify. Without this, spctl reports "no usable
+# signature" even though the stapled notarization ticket is valid.
+if [ -n "$DEVELOPER_ID" ]; then
+    codesign --force --sign "$DEVELOPER_ID" --timestamp "$BUILD_DIR/$DMG_NAME"
+fi
+
 # Cleanup temp before notarization so only the DMG remains
 rm -rf "$DMG_TEMP"
 
@@ -192,11 +199,13 @@ fi
 cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-AppleSilicon.dmg"
 cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-Intel.dmg"
 
-# Final Gatekeeper assessment so the user sees it PASS (or why it didn't).
+# Final Gatekeeper assessments — DMGs use --type install, the .app uses
+# --type exec (default). Both should report "accepted"/"Notarized Developer ID".
 echo ""
-echo -e "${YELLOW}[+]${NC} Final Gatekeeper check:"
-spctl -a -vv --type open --context context:primary-signature \
-    "$BUILD_DIR/$DMG_NAME" 2>&1 || true
+echo -e "${YELLOW}[+]${NC} Final Gatekeeper check (DMG):"
+spctl -a -vv --type install "$BUILD_DIR/$DMG_NAME" 2>&1 || true
+echo -e "${YELLOW}[+]${NC} Final Gatekeeper check (app inside):"
+spctl -a -vv "$APP_PATH" 2>&1 || true
 echo ""
 
 echo -e "${GREEN}${BOLD}"
