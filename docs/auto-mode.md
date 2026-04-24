@@ -21,7 +21,7 @@ Au démarrage d'un enregistrement :
 3. Le panneau d'enregistrement affiche `auto: <Mode> (<App>)` en muted
 4. Shift pour cycler manuellement → le label auto disparaît (override pris en compte)
 
-Si aucun match, c'est le mode courant (= dernier utilisé) qui reste actif.
+Si aucun match, par défaut Whisper Voice **reset en Brut** pour que le mode d'une app (ex: Slack) ne se propage pas dans des dictées sans rapport. Tu peux basculer ce comportement dans `Préférences → Auto-mode → "Keep the last-used mode when no rule matches"` — quand coché, le mode courant est préservé (ancien comportement pre-3.6.2).
 
 ## Logs
 

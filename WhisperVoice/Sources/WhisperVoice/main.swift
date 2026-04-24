@@ -1964,6 +1964,7 @@ class PreferencesWindow: NSObject, NSWindowDelegate, NSTextViewDelegate, NSTable
             lastUsedProjectID: currentConfig?.lastUsedProjectID ?? "",
             appModeOverrides: currentConfig?.appModeOverrides ?? [:],
             autoSelectModeEnabled: currentConfig?.autoSelectModeEnabled ?? true,
+            autoModeFallbackToLastUsed: currentConfig?.autoModeFallbackToLastUsed ?? false,
             processingModel: processingModelPopup.selectedItem?.representedObject as? String ?? "gpt-5.4-nano",
             skippedUpdateVersion: currentConfig?.skippedUpdateVersion ?? "",
             lastUpdateCheck: currentConfig?.lastUpdateCheck ?? 0
@@ -2071,6 +2072,10 @@ struct Config {
     // Auto-select mode by app: bundleID -> modeId
     var appModeOverrides: [String: String]
     var autoSelectModeEnabled: Bool
+    /// When no mapping matches the current app, what should we do?
+    /// false (default) → reset to Brut so Slack's mode doesn't leak into unrelated apps
+    /// true            → keep the last-used mode (pre-3.6.2 behavior)
+    var autoModeFallbackToLastUsed: Bool
 
     // LLM model for AI processing modes
     var processingModel: String
@@ -2133,6 +2138,7 @@ struct Config {
         // Auto-select mode by app
         let appModeOverrides = json["appModeOverrides"] as? [String: String] ?? [:]
         let autoSelectModeEnabled = json["autoSelectModeEnabled"] as? Bool ?? true
+        let autoModeFallbackToLastUsed = json["autoModeFallbackToLastUsed"] as? Bool ?? false
 
         // Processing model
         let processingModel = json["processingModel"] as? String ?? "gpt-5.4-nano"
@@ -2159,6 +2165,7 @@ struct Config {
             lastUsedProjectID: lastUsedProjectID,
             appModeOverrides: appModeOverrides,
             autoSelectModeEnabled: autoSelectModeEnabled,
+            autoModeFallbackToLastUsed: autoModeFallbackToLastUsed,
             processingModel: processingModel,
             skippedUpdateVersion: skippedUpdateVersion,
             lastUpdateCheck: lastUpdateCheck
@@ -2207,6 +2214,9 @@ struct Config {
         }
         if !autoSelectModeEnabled {
             json["autoSelectModeEnabled"] = false
+        }
+        if autoModeFallbackToLastUsed {
+            json["autoModeFallbackToLastUsed"] = true
         }
         if processingModel != "gpt-5.4-nano" {
             json["processingModel"] = processingModel
@@ -7151,6 +7161,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 lastUsedProjectID: "",
                 appModeOverrides: [:],
                 autoSelectModeEnabled: true,
+                autoModeFallbackToLastUsed: false,
                 processingModel: "gpt-5.4-nano",
                 skippedUpdateVersion: "",
                 lastUpdateCheck: 0
@@ -7458,20 +7469,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Stashes a human-readable reason in pendingAutoModeReason for the panel label.
     private func applyAutoSelectMode(for ctx: DictationContext?) {
         guard let config = Config.load(), config.autoSelectModeEnabled else { return }
-        guard let bundleID = ctx?.app?.bundleID,
-              let modeId = config.appModeOverrides[bundleID] else { return }
-        guard let mode = ModeManager.shared.modes.first(where: { $0.id == modeId }),
-              ModeManager.shared.isModeAvailable(mode) else { return }
-        ModeManager.shared.setMode(id: modeId)
-        // Critical: setupModeSwitchMonitor already snapshotted the *previous* mode into
-        // selectedModeForCurrentRecording (captureNow is async). Update it so the finalize
-        // step uses the auto-selected mode, not the stale pre-switch one.
-        selectedModeForCurrentRecording = mode
-        recordingWindow?.updateModeSelection()
-        let appName = ctx?.app?.name ?? bundleID
-        pendingAutoModeReason = "auto: \(mode.name) (\(appName))"
-        recordingWindow?.setAutoModeReason(pendingAutoModeReason)
-        LogManager.shared.log("[AutoMode] bundleID=\(bundleID) → \(mode.name) (locked as recording mode)")
+
+        let bundleID = ctx?.app?.bundleID
+        let mappedId = bundleID.flatMap { config.appModeOverrides[$0] }
+        let mappedMode = mappedId.flatMap { id in
+            ModeManager.shared.modes.first(where: { $0.id == id && ModeManager.shared.isModeAvailable($0) })
+        }
+
+        if let mode = mappedMode, let bundleID = bundleID {
+            // Explicit mapping wins.
+            ModeManager.shared.setMode(id: mode.id)
+            selectedModeForCurrentRecording = mode
+            recordingWindow?.updateModeSelection()
+            let appName = ctx?.app?.name ?? bundleID
+            pendingAutoModeReason = "auto: \(mode.name) (\(appName))"
+            recordingWindow?.setAutoModeReason(pendingAutoModeReason)
+            LogManager.shared.log("[AutoMode] bundleID=\(bundleID) → \(mode.name) (locked as recording mode)")
+            return
+        }
+
+        // No mapping matches. Per the `autoModeFallbackToLastUsed` toggle, either
+        // leave the current (last-used) mode alone, or reset to Brut so the
+        // previous app's mode (e.g. Slack) doesn't leak into unrelated dictations.
+        if config.autoModeFallbackToLastUsed {
+            return  // keep current mode, historical behavior
+        }
+
+        let brutId = "voice-to-text"
+        guard let brut = ModeManager.shared.modes.first(where: { $0.id == brutId }) else { return }
+        // Only act if we're NOT already on Brut — avoid unnecessary churn + logs.
+        if ModeManager.shared.currentMode.id != brutId {
+            ModeManager.shared.setMode(id: brutId)
+            selectedModeForCurrentRecording = brut
+            recordingWindow?.updateModeSelection()
+            LogManager.shared.log("[AutoMode] no mapping for bundleID=\(bundleID ?? "?") → reset to Brut")
+        } else {
+            // Still make sure the recording-locked mode is Brut (may have been
+            // overridden by a previous Shift-cycle that left selectedMode stale).
+            selectedModeForCurrentRecording = brut
+        }
     }
 
     private func startRecording(showStopMessage: Bool) {

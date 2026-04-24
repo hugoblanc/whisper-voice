@@ -61,7 +61,7 @@ final class ConfigStore: ObservableObject {
             customVocabulary: [], customModes: [],
             disabledBuiltInModeIds: [],
             projectTaggingEnabled: true, lastUsedProjectID: "",
-            appModeOverrides: [:], autoSelectModeEnabled: true,
+            appModeOverrides: [:], autoSelectModeEnabled: true, autoModeFallbackToLastUsed: false,
             processingModel: "gpt-5.4-nano",
             skippedUpdateVersion: "", lastUpdateCheck: 0
         )
@@ -94,6 +94,7 @@ extension Config {
             && projectTaggingEnabled == other.projectTaggingEnabled
             && appModeOverrides == other.appModeOverrides
             && autoSelectModeEnabled == other.autoSelectModeEnabled
+            && autoModeFallbackToLastUsed == other.autoModeFallbackToLastUsed
             && processingModel == other.processingModel
     }
 }
@@ -656,6 +657,13 @@ struct AutoModePane: View {
 
             Section {
                 Toggle("Enable auto-select", isOn: $store.draft.autoSelectModeEnabled)
+                Toggle("Keep the last-used mode when no rule matches", isOn: $store.draft.autoModeFallbackToLastUsed)
+                    .disabled(!store.draft.autoSelectModeEnabled)
+                Text(store.draft.autoModeFallbackToLastUsed
+                     ? "When you open an app without a rule, Whisper Voice keeps whatever mode was active. Slack's mode may leak into unrelated dictations."
+                     : "When you open an app without a rule, Whisper Voice resets to Brut so modes don't leak across contexts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
