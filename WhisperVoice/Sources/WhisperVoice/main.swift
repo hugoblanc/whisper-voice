@@ -34,6 +34,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var enterRunLoopSource: CFRunLoopSource?
     private var postActionOverrideId: String?
 
+    // Live transcript via OpenAI Realtime API
+    private var realtimeTranscriber: RealtimeTranscriber?
+
     // Permission wizard
     private var permissionWizard: PermissionWizard?
 
@@ -685,6 +688,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingWindow?.onCancel = { [weak self] in
             self?.cancelRecording()
         }
+        recordingWindow?.onModeChanged = { [weak self] mode in
+            self?.selectedModeForCurrentRecording = mode
+            self?.pendingAutoModeReason = nil
+            self?.recordingWindow?.setAutoModeReason(nil)
+            LogManager.shared.log("Mode switched to: \(mode.name)")
+        }
         recordingWindow?.onProjectChanged = { [weak self] project, source in
             self?.pendingProject = project
             self?.pendingProjectSource = source
@@ -833,6 +842,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupCancelHotkey()
         setupModeSwitchMonitor()
         setupEnterToggleMonitor()
+        startLiveTranscript()
     }
 
     private func stopRecording() {
@@ -842,6 +852,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         removeCancelHotkey()
         removeModeSwitchMonitor()
         removeEnterToggleMonitor()
+        stopLiveTranscript()
 
         guard let audioURL = audioRecorder.stopRecording() else {
             LogManager.shared.log("No audio URL returned from stopRecording", level: "WARNING")
@@ -1011,6 +1022,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         removeCancelHotkey()
         removeModeSwitchMonitor()
         removeEnterToggleMonitor()
+        stopLiveTranscript()
 
         // Stop and discard recording
         _ = audioRecorder.stopRecording()
@@ -1027,6 +1039,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Play cancel sound
         NSSound(named: "Basso")?.play()
+    }
+
+    // MARK: - Live Transcript (OpenAI Realtime API)
+
+    private func startLiveTranscript() {
+        guard let apiKey = ModeManager.shared.openAIKey else { return }
+        let transcriber = RealtimeTranscriber()
+        transcriber.onTranscript = { [weak self] text in
+            self?.recordingWindow?.updateTranscript(text)
+        }
+        transcriber.start(apiKey: apiKey, language: "fr", vocabulary: config?.customVocabulary)
+        realtimeTranscriber = transcriber
+    }
+
+    private func stopLiveTranscript() {
+        realtimeTranscriber?.stop()
+        realtimeTranscriber = nil
     }
 
     private func setupCancelHotkey() {

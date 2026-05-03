@@ -151,6 +151,26 @@ class ModeSelectorView: NSView {
         _ = ModeManager.shared.nextMode()
         updateSelection(animated: true)
     }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        for (index, container) in modeViews.enumerated() {
+            if container.frame.contains(point) {
+                guard ModeManager.shared.isModeAvailable(at: index) else { return }
+                ModeManager.shared.setMode(index: index)
+                updateSelection(animated: true)
+                return
+            }
+        }
+    }
+
+    override func resetCursorRects() {
+        for (index, container) in modeViews.enumerated() {
+            if ModeManager.shared.isModeAvailable(at: index) {
+                addCursorRect(container.frame, cursor: .pointingHand)
+            }
+        }
+    }
 }
 
 // MARK: - Waveform View
@@ -388,6 +408,7 @@ class RecordingWindow: NSObject {
     private var projectChip: ProjectChipView!
     private var autoModeLabel: NSTextField!
     private var modeSwitchHint: NSTextField!
+    private var transcriptLabel: NSTextField!
     private var projectPicker: NSPopover?
 
     /// Called when user picks a different project (or nil = untag) for the
@@ -419,7 +440,7 @@ class RecordingWindow: NSObject {
         // Center). Falls back gracefully on older macOS versions since material types
         // are available since 10.14.
         window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 234),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 320),
             styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -471,44 +492,37 @@ class RecordingWindow: NSObject {
         highlight.fillColor = NSColor.clear.cgColor
         contentView.layer?.addSublayer(highlight)
 
-        // Waveform view at top (below title bar area)
-        waveformView = WaveformView(frame: NSRect(x: 16, y: 174, width: 328, height: 45))
+        waveformView = WaveformView(frame: NSRect(x: 16, y: 236, width: 348, height: 48))
         contentView.addSubview(waveformView)
 
         // Status row: dot + label + timer
-        // Halo is a sibling of the dot (not a sublayer) so it isn't clipped by
-        // the dot's corner-radius masking. Kept small (18x18) and subtle —
-        // earlier iterations at 28x28 felt bloated relative to the 10px dot.
-        statusDotHalo = NSView(frame: NSRect(x: 12, y: 146, width: 18, height: 18))
+        statusDotHalo = NSView(frame: NSRect(x: 12, y: 210, width: 18, height: 18))
         statusDotHalo.wantsLayer = true
         statusDotHalo.layer?.cornerRadius = 9
         statusDotHalo.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.45).cgColor
         statusDotHalo.alphaValue = 0
         contentView.addSubview(statusDotHalo)
 
-        statusDot = NSView(frame: NSRect(x: 16, y: 150, width: 10, height: 10))
+        statusDot = NSView(frame: NSRect(x: 16, y: 214, width: 10, height: 10))
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
         statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
         contentView.addSubview(statusDot)
 
         statusLabel = NSTextField(labelWithString: "Recording")
-        statusLabel.frame = NSRect(x: 32, y: 147, width: 120, height: 18)
+        statusLabel.frame = NSRect(x: 32, y: 211, width: 120, height: 18)
         statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         statusLabel.textColor = .white
         contentView.addSubview(statusLabel)
 
         timerLabel = NSTextField(labelWithString: "0:00")
-        timerLabel.frame = NSRect(x: 290, y: 147, width: 55, height: 18)
+        timerLabel.frame = NSRect(x: 308, y: 211, width: 55, height: 18)
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.65)
         timerLabel.alignment = .right
         contentView.addSubview(timerLabel)
 
-        // Mode selector — container width now matches the modes only. The
-        // "⇧ switch" hint is a separate sibling label (modeSwitchHint)
-        // positioned to the right, so it doesn't look like a disabled mode.
-        modeSelector = ModeSelectorView(frame: NSRect(x: 12, y: 106, width: 260, height: 36))
+        modeSelector = ModeSelectorView(frame: NSRect(x: 16, y: 112, width: 260, height: 36))
         modeSelector.onModeChanged = { [weak self] index in
             let mode = ModeManager.shared.modes[index]
             self?.onModeChanged?(mode)
@@ -518,7 +532,7 @@ class RecordingWindow: NSObject {
         modeSwitchHint = NSTextField(labelWithString: "")
         modeSwitchHint.font = NSFont.systemFont(ofSize: 10, weight: .regular)
         modeSwitchHint.textColor = NSColor.white.withAlphaComponent(0.38)
-        modeSwitchHint.frame = NSRect(x: 0, y: 114, width: 90, height: 14)
+        modeSwitchHint.frame = NSRect(x: 0, y: 120, width: 90, height: 14)
         contentView.addSubview(modeSwitchHint)
         refreshModeSwitchHint()
         NotificationCenter.default.addObserver(
@@ -527,30 +541,36 @@ class RecordingWindow: NSObject {
             name: .modeSelectorLayoutChanged, object: nil
         )
 
-        // Auto-mode reason label (muted, hidden unless auto-selection kicked in)
         autoModeLabel = NSTextField(labelWithString: "")
-        autoModeLabel.frame = NSRect(x: 16, y: 84, width: 328, height: 16)
+        autoModeLabel.frame = NSRect(x: 16, y: 92, width: 348, height: 16)
         autoModeLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         autoModeLabel.textColor = NSColor.white.withAlphaComponent(0.55)
         autoModeLabel.alignment = .center
         autoModeLabel.isHidden = true
         contentView.addSubview(autoModeLabel)
 
-        // Project chip — between mode selector and action buttons
-        projectChip = ProjectChipView(frame: NSRect(x: 12, y: 48, width: 336, height: 30))
+        // Live transcript — shows partial transcription as user speaks
+        transcriptLabel = NSTextField(wrappingLabelWithString: "")
+        transcriptLabel.frame = NSRect(x: 16, y: 164, width: 348, height: 36)
+        transcriptLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        transcriptLabel.textColor = NSColor.white.withAlphaComponent(0.45)
+        transcriptLabel.maximumNumberOfLines = 2
+        transcriptLabel.lineBreakMode = .byTruncatingHead
+        transcriptLabel.isHidden = true
+        contentView.addSubview(transcriptLabel)
+
+        projectChip = ProjectChipView(frame: NSRect(x: 16, y: 56, width: 348, height: 28))
         projectChip.onClick = { [weak self] in self?.showProjectPicker() }
         contentView.addSubview(projectChip)
 
-        // Capsule action buttons — custom views for a pill shape and translucent fill
-        // that play nicer with the glass background than NSButton(bezelStyle: .rounded).
         let cancelCapsule = CapsuleButton(title: "Cancel", symbol: "xmark", isDestructive: false)
-        cancelCapsule.frame = NSRect(x: 16, y: 10, width: 96, height: 32)
+        cancelCapsule.frame = NSRect(x: 16, y: 14, width: 100, height: 32)
         cancelCapsule.onClick = { [weak self] in self?.cancelClicked() }
         cancelCapsule.keyEquivalent = "\u{1b}"
         contentView.addSubview(cancelCapsule)
 
         let stopCapsule = CapsuleButton(title: "Stop", symbol: "stop.fill", isPrimary: true)
-        stopCapsule.frame = NSRect(x: 248, y: 10, width: 96, height: 32)
+        stopCapsule.frame = NSRect(x: 264, y: 14, width: 100, height: 32)
         stopCapsule.onClick = { [weak self] in self?.stopClicked() }
         stopCapsule.keyEquivalent = "\r"
         contentView.addSubview(stopCapsule)
@@ -565,6 +585,8 @@ class RecordingWindow: NSObject {
         modeSelector.updateSelection(animated: false)
         autoModeLabel.stringValue = ""
         autoModeLabel.isHidden = true
+        transcriptLabel?.stringValue = ""
+        transcriptLabel?.isHidden = true
         setStatus(.recording)
 
         // Position at top center of main screen
@@ -620,6 +642,17 @@ class RecordingWindow: NSObject {
 
     func cycleMode() {
         modeSelector.cycleMode()
+    }
+
+    func updateTranscript(_ text: String) {
+        guard let label = transcriptLabel else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            label.isHidden = true
+            return
+        }
+        label.stringValue = trimmed
+        label.isHidden = false
     }
 
     /// Re-highlight the currently active mode (e.g. after auto-mode switched it externally).
