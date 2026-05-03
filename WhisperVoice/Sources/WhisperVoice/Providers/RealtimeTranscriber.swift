@@ -24,6 +24,14 @@ class RealtimeTranscriber {
         }
     }
 
+    func pause() {
+        audioEngine?.pause()
+    }
+
+    func resume() {
+        try? audioEngine?.start()
+    }
+
     func stop() {
         isRunning = false
         if let engine = audioEngine, engine.isRunning {

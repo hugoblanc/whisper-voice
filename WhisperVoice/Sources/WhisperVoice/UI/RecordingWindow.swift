@@ -335,6 +335,14 @@ final class CapsuleButton: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
 
+    func setTitle(_ title: String, symbol: String? = nil) {
+        titleField.stringValue = title
+        if let symbol = symbol,
+           let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title) {
+            iconView.image = image
+        }
+    }
+
     override func layout() {
         super.layout()
         layer?.cornerRadius = bounds.height / 2   // fully pill
@@ -403,6 +411,7 @@ class RecordingWindow: NSObject {
     private var statusLabel: NSTextField!
     private var timerLabel: NSTextField!
     private var cancelCapsuleButton: CapsuleButton?
+    private var pauseCapsuleButton: CapsuleButton?
     private var stopCapsuleButton: CapsuleButton?
     private var modeSelector: ModeSelectorView!
     private var projectChip: ProjectChipView!
@@ -417,14 +426,19 @@ class RecordingWindow: NSObject {
 
     private var updateTimer: Timer?
     private var recordingStartTime: Date?
+    private var pausedElapsed: TimeInterval = 0
+    private var isPaused = false
 
     var onStop: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onPause: (() -> Void)?
+    var onResume: (() -> Void)?
     var audioLevelProvider: (() -> Float)?
     var onModeChanged: ((ProcessingMode) -> Void)?
 
     enum RecordingStatus {
         case recording
+        case paused
         case processing
         case completed
     }
@@ -564,23 +578,31 @@ class RecordingWindow: NSObject {
         contentView.addSubview(projectChip)
 
         let cancelCapsule = CapsuleButton(title: "Cancel", symbol: "xmark", isDestructive: false)
-        cancelCapsule.frame = NSRect(x: 16, y: 14, width: 100, height: 32)
+        cancelCapsule.frame = NSRect(x: 16, y: 14, width: 90, height: 32)
         cancelCapsule.onClick = { [weak self] in self?.cancelClicked() }
         cancelCapsule.keyEquivalent = "\u{1b}"
         contentView.addSubview(cancelCapsule)
 
+        let pauseCapsule = CapsuleButton(title: "Pause", symbol: "pause.fill")
+        pauseCapsule.frame = NSRect(x: 140, y: 14, width: 100, height: 32)
+        pauseCapsule.onClick = { [weak self] in self?.pauseResumeClicked() }
+        contentView.addSubview(pauseCapsule)
+
         let stopCapsule = CapsuleButton(title: "Stop", symbol: "stop.fill", isPrimary: true)
-        stopCapsule.frame = NSRect(x: 264, y: 14, width: 100, height: 32)
+        stopCapsule.frame = NSRect(x: 274, y: 14, width: 90, height: 32)
         stopCapsule.onClick = { [weak self] in self?.stopClicked() }
         stopCapsule.keyEquivalent = "\r"
         contentView.addSubview(stopCapsule)
 
         self.cancelCapsuleButton = cancelCapsule
+        self.pauseCapsuleButton = pauseCapsule
         self.stopCapsuleButton = stopCapsule
     }
 
     func show() {
         recordingStartTime = Date()
+        pausedElapsed = 0
+        isPaused = false
         waveformView.reset()
         modeSelector.updateSelection(animated: false)
         autoModeLabel.stringValue = ""
@@ -621,7 +643,15 @@ class RecordingWindow: NSObject {
             statusLabel.stringValue = "Recording"
             waveformView.baseColor = NSColor.systemRed
             waveformView.accentColor = NSColor.systemOrange
+            pauseCapsuleButton?.setTitle("Pause", symbol: "pause.fill")
             startPulsingDot()
+        case .paused:
+            statusDot.layer?.backgroundColor = NSColor.systemYellow.cgColor
+            statusLabel.stringValue = "Paused"
+            waveformView.baseColor = NSColor.systemYellow
+            waveformView.accentColor = NSColor.systemOrange
+            pauseCapsuleButton?.setTitle("Resume", symbol: "play.fill")
+            stopPulsingDot()
         case .processing:
             statusDot.layer?.backgroundColor = NSColor.systemBlue.cgColor
             let mode = ModeManager.shared.currentMode
@@ -669,9 +699,9 @@ class RecordingWindow: NSObject {
             updateStatusDotHalo(level: level)
         }
 
-        // Update timer
+        // Update timer (accounts for time spent paused)
         if let startTime = recordingStartTime {
-            let elapsed = Date().timeIntervalSince(startTime)
+            let elapsed = pausedElapsed + Date().timeIntervalSince(startTime)
             let minutes = Int(elapsed) / 60
             let seconds = Int(elapsed) % 60
             timerLabel.stringValue = String(format: "%d:%02d", minutes, seconds)
@@ -758,6 +788,28 @@ class RecordingWindow: NSObject {
     @objc private func cancelClicked() {
         hide()
         onCancel?()
+    }
+
+    private func pauseResumeClicked() {
+        if isPaused {
+            isPaused = false
+            recordingStartTime = Date()
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                self?.updateWaveform()
+            }
+            setStatus(.recording)
+            onResume?()
+        } else {
+            isPaused = true
+            if let start = recordingStartTime {
+                pausedElapsed += Date().timeIntervalSince(start)
+            }
+            recordingStartTime = nil
+            updateTimer?.invalidate()
+            updateTimer = nil
+            setStatus(.paused)
+            onPause?()
+        }
     }
 
     // MARK: - Project tagging

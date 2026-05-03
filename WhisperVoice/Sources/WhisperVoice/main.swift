@@ -688,6 +688,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingWindow?.onCancel = { [weak self] in
             self?.cancelRecording()
         }
+        recordingWindow?.onPause = { [weak self] in
+            self?.audioRecorder.pauseRecording()
+            self?.realtimeTranscriber?.pause()
+            LogManager.shared.log("Recording paused")
+        }
+        recordingWindow?.onResume = { [weak self] in
+            self?.audioRecorder.resumeRecording()
+            self?.realtimeTranscriber?.resume()
+            LogManager.shared.log("Recording resumed")
+        }
         recordingWindow?.onModeChanged = { [weak self] mode in
             self?.selectedModeForCurrentRecording = mode
             self?.pendingAutoModeReason = nil

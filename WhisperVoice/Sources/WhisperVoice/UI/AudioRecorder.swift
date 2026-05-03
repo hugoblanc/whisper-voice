@@ -67,6 +67,14 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         }
     }
 
+    func pauseRecording() {
+        audioRecorder?.pause()
+    }
+
+    func resumeRecording() {
+        audioRecorder?.record()
+    }
+
     func stopRecording() -> URL? {
         audioRecorder?.stop()
         return tempFileURL
