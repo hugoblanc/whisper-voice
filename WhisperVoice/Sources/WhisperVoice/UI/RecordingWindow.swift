@@ -209,67 +209,62 @@ class WaveformView: NSView {
         needsDisplay = true
     }
 
+    private func colorForLevel(_ level: CGFloat) -> NSColor {
+        if level > 0.7 {
+            return NSColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 1.0)
+        } else if level > 0.4 {
+            let t = (level - 0.4) / 0.3
+            return NSColor(red: 0.9 + 0.1 * t, green: 0.25 + 0.3 * t, blue: 0.12, alpha: 1.0)
+        } else {
+            return baseColor
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        guard NSGraphicsContext.current?.cgContext != nil else { return }
 
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-
-        // Background
-        context.setFillColor(NSColor.clear.cgColor)
-        context.fill(bounds)
-
-        // Draw bars - sleek design
-        let barWidth: CGFloat = 3
-        let barSpacing: CGFloat = 3
+        let barWidth: CGFloat = 3.5
+        let barSpacing: CGFloat = 2.5
         let totalBarWidth = barWidth + barSpacing
         let numBars = smoothedLevels.count
         let startX = (bounds.width - CGFloat(numBars) * totalBarWidth) / 2
-        let minHeight: CGFloat = 4
+        let minHeight: CGFloat = 3
         let maxHeight = bounds.height
 
+        // Pass 1 — outer glow halos (wide, faint)
         for i in 0..<numBars {
             let displayIndex = (currentIndex + i) % numBars
             let level = smoothedLevels[displayIndex]
+            guard level > 0.08 else { continue }
 
-            // More dramatic height variation with curve
-            let boostedLevel = pow(level, 0.6)  // Boost low levels for visibility
-            let barHeight = max(minHeight, boostedLevel * maxHeight)
+            let h = max(minHeight, pow(level, 0.6) * maxHeight)
             let x = startX + CGFloat(i) * totalBarWidth
-            let y = (bounds.height - barHeight) / 2
+            let y = (bounds.height - h) / 2
+            let color = colorForLevel(level)
 
-            let barRect = NSRect(x: x, y: y, width: barWidth, height: barHeight)
+            let g1 = NSRect(x: x, y: y, width: barWidth, height: h).insetBy(dx: -3, dy: -3)
+            color.withAlphaComponent(level * 0.18).setFill()
+            NSBezierPath(roundedRect: g1, xRadius: (barWidth + 6) / 2, yRadius: (barWidth + 6) / 2).fill()
 
-            // Gradient color based on level - red to orange to yellow for peaks
-            let color: NSColor
-            if level > 0.7 {
-                // Peak - bright orange/yellow
-                color = NSColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 1.0)
-            } else if level > 0.4 {
-                // Medium-high - orange blend
-                let t = (level - 0.4) / 0.3
-                color = NSColor(
-                    red: 0.9 + 0.1 * t,
-                    green: 0.3 + 0.3 * t,
-                    blue: 0.2,
-                    alpha: 1.0
-                )
-            } else {
-                // Low to medium - base red
-                color = baseColor
+            if level > 0.35 {
+                let g2 = NSRect(x: x, y: y, width: barWidth, height: h).insetBy(dx: -6, dy: -6)
+                color.withAlphaComponent((level - 0.35) * 0.12).setFill()
+                NSBezierPath(roundedRect: g2, xRadius: (barWidth + 12) / 2, yRadius: (barWidth + 12) / 2).fill()
             }
+        }
 
-            // Subtle glow for high levels
-            if level > 0.5 {
-                let glowRect = barRect.insetBy(dx: -1.5, dy: -1.5)
-                let glowPath = NSBezierPath(roundedRect: glowRect, xRadius: (barWidth + 3) / 2, yRadius: (barWidth + 3) / 2)
-                color.withAlphaComponent(0.25).setFill()
-                glowPath.fill()
-            }
+        // Pass 2 — crisp bars
+        for i in 0..<numBars {
+            let displayIndex = (currentIndex + i) % numBars
+            let level = smoothedLevels[displayIndex]
+            let h = max(minHeight, pow(level, 0.6) * maxHeight)
+            let x = startX + CGFloat(i) * totalBarWidth
+            let y = (bounds.height - h) / 2
 
-            // Main bar with rounded caps
-            let path = NSBezierPath(roundedRect: barRect, xRadius: barWidth / 2, yRadius: barWidth / 2)
-            color.setFill()
-            path.fill()
+            colorForLevel(level).setFill()
+            NSBezierPath(roundedRect: NSRect(x: x, y: y, width: barWidth, height: h),
+                         xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
         }
     }
 }
@@ -407,7 +402,6 @@ class RecordingWindow: NSObject {
     private var window: NSPanel!
     private var waveformView: WaveformView!
     private var statusDot: NSView!
-    private var statusDotHalo: NSView!  // Larger sibling that pulses with audio — placed behind statusDot
     private var statusLabel: NSTextField!
     private var timerLabel: NSTextField!
     private var cancelCapsuleButton: CapsuleButton?
@@ -454,7 +448,7 @@ class RecordingWindow: NSObject {
         // Center). Falls back gracefully on older macOS versions since material types
         // are available since 10.14.
         window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 336),
             styleMask: [.nonactivatingPanel, .titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -506,31 +500,24 @@ class RecordingWindow: NSObject {
         highlight.fillColor = NSColor.clear.cgColor
         contentView.layer?.addSublayer(highlight)
 
-        waveformView = WaveformView(frame: NSRect(x: 16, y: 236, width: 348, height: 48))
+        waveformView = WaveformView(frame: NSRect(x: 16, y: 252, width: 348, height: 48))
         contentView.addSubview(waveformView)
 
         // Status row: dot + label + timer
-        statusDotHalo = NSView(frame: NSRect(x: 12, y: 210, width: 18, height: 18))
-        statusDotHalo.wantsLayer = true
-        statusDotHalo.layer?.cornerRadius = 9
-        statusDotHalo.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.45).cgColor
-        statusDotHalo.alphaValue = 0
-        contentView.addSubview(statusDotHalo)
-
-        statusDot = NSView(frame: NSRect(x: 16, y: 214, width: 10, height: 10))
+        statusDot = NSView(frame: NSRect(x: 16, y: 230, width: 10, height: 10))
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
         statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
         contentView.addSubview(statusDot)
 
         statusLabel = NSTextField(labelWithString: "Recording")
-        statusLabel.frame = NSRect(x: 32, y: 211, width: 120, height: 18)
+        statusLabel.frame = NSRect(x: 32, y: 227, width: 120, height: 18)
         statusLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         statusLabel.textColor = .white
         contentView.addSubview(statusLabel)
 
         timerLabel = NSTextField(labelWithString: "0:00")
-        timerLabel.frame = NSRect(x: 308, y: 211, width: 55, height: 18)
+        timerLabel.frame = NSRect(x: 308, y: 227, width: 55, height: 18)
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.65)
         timerLabel.alignment = .right
@@ -565,10 +552,10 @@ class RecordingWindow: NSObject {
 
         // Live transcript — shows partial transcription as user speaks
         transcriptLabel = NSTextField(wrappingLabelWithString: "")
-        transcriptLabel.frame = NSRect(x: 16, y: 164, width: 348, height: 36)
+        transcriptLabel.frame = NSRect(x: 16, y: 160, width: 348, height: 56)
         transcriptLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         transcriptLabel.textColor = NSColor.white.withAlphaComponent(0.45)
-        transcriptLabel.maximumNumberOfLines = 2
+        transcriptLabel.maximumNumberOfLines = 3
         transcriptLabel.lineBreakMode = .byTruncatingHead
         transcriptLabel.isHidden = true
         contentView.addSubview(transcriptLabel)
@@ -691,12 +678,8 @@ class RecordingWindow: NSObject {
     }
 
     private func updateWaveform() {
-        // Update waveform with current audio level
         if let level = audioLevelProvider?() {
             waveformView.addLevel(level)
-            // Drive the halo glow around the status dot with the same audio level —
-            // gives a "breathing, alive" feel that reacts to speech.
-            updateStatusDotHalo(level: level)
         }
 
         // Update timer (accounts for time spent paused)
@@ -708,53 +691,21 @@ class RecordingWindow: NSObject {
         }
     }
 
-    private var pulseTimer: Timer?
-    private var haloLevel: Float = 0
-    private var haloActive: Bool = false
-
-    /// Smoothed alpha + subtle scale modulation of the halo based on input audio.
-    /// Kept very subtle — max ~1.2x scale and 0.7 alpha so it never dominates.
-    private func updateStatusDotHalo(level: Float) {
-        guard haloActive, let halo = statusDotHalo, let layer = halo.layer else { return }
-        haloLevel = haloLevel * 0.55 + max(0, min(1, level)) * 0.45
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        halo.alphaValue = CGFloat(0.1 + haloLevel * 0.6)
-        let scale = CGFloat(1.0 + haloLevel * 0.22)
-        layer.transform = CATransform3DMakeScale(scale, scale, 1)
-        CATransaction.commit()
-    }
-
     private func startPulsingDot() {
-        haloActive = true
-        // Baseline slow heartbeat whenever audio is silent so the dot keeps
-        // signalling "recording" even during speech pauses.
-        pulseTimer?.invalidate()
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: 1.1, repeats: true) { [weak self] _ in
-            guard let self = self, self.haloActive, self.haloLevel < 0.08 else { return }
-            guard let halo = self.statusDotHalo, let layer = halo.layer else { return }
-            let alphaAnim = CABasicAnimation(keyPath: "opacity")
-            alphaAnim.fromValue = 0.15
-            alphaAnim.toValue = 0.55
-            alphaAnim.duration = 0.55
-            alphaAnim.autoreverses = true
-            alphaAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            layer.add(alphaAnim, forKey: "idlePulseOpacity")
-        }
+        guard let layer = statusDot.layer else { return }
+        let blink = CABasicAnimation(keyPath: "opacity")
+        blink.fromValue = 1.0
+        blink.toValue = 0.15
+        blink.duration = 0.8
+        blink.autoreverses = true
+        blink.repeatCount = .infinity
+        blink.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(blink, forKey: "blink")
     }
 
     private func stopPulsingDot() {
-        haloActive = false
-        pulseTimer?.invalidate()
-        pulseTimer = nil
+        statusDot.layer?.removeAnimation(forKey: "blink")
         statusDot.alphaValue = 1.0
-        statusDotHalo?.layer?.removeAllAnimations()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        statusDotHalo?.alphaValue = 0
-        statusDotHalo?.layer?.transform = CATransform3DIdentity
-        CATransaction.commit()
-        haloLevel = 0
     }
 
     private func playSound(named name: String) {
