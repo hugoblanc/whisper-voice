@@ -63,6 +63,7 @@ final class ConfigStore: ObservableObject {
             projectTaggingEnabled: true, lastUsedProjectID: "",
             appModeOverrides: [:], autoSelectModeEnabled: true, autoModeFallbackToLastUsed: false,
             processingModel: "gpt-5.4-nano",
+            postActions: PostAction.defaultActions(), activePostActionId: "builtin-paste",
             skippedUpdateVersion: "", lastUpdateCheck: 0
         )
     }
@@ -96,6 +97,11 @@ extension Config {
             && autoSelectModeEnabled == other.autoSelectModeEnabled
             && autoModeFallbackToLastUsed == other.autoModeFallbackToLastUsed
             && processingModel == other.processingModel
+            && postActions.map { $0["id"] ?? "" } == other.postActions.map { $0["id"] ?? "" }
+            && postActions.map { $0["label"] ?? "" } == other.postActions.map { $0["label"] ?? "" }
+            && postActions.map { $0["type"] ?? "" } == other.postActions.map { $0["type"] ?? "" }
+            && postActions.map { $0["command"] ?? "" } == other.postActions.map { $0["command"] ?? "" }
+            && activePostActionId == other.activePostActionId
     }
 }
 
@@ -146,7 +152,7 @@ struct ShortcutRecorderRepresentable: NSViewRepresentable {
 // MARK: - Preferences root
 
 enum PreferencePane: String, CaseIterable, Identifiable {
-    case general, shortcuts, modes, autoMode, projects, logs
+    case general, shortcuts, modes, autoMode, actions, projects, logs
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -154,6 +160,7 @@ enum PreferencePane: String, CaseIterable, Identifiable {
         case .shortcuts: return "Shortcuts"
         case .modes: return "Modes"
         case .autoMode: return "Auto-mode"
+        case .actions: return "Actions"
         case .projects: return "Projects"
         case .logs: return "Logs"
         }
@@ -164,6 +171,7 @@ enum PreferencePane: String, CaseIterable, Identifiable {
         case .shortcuts: return "keyboard"
         case .modes: return "sparkles"
         case .autoMode: return "app.badge.checkmark"
+        case .actions: return "bolt.circle"
         case .projects: return "folder"
         case .logs: return "doc.text.magnifyingglass"
         }
@@ -188,6 +196,7 @@ struct PreferencesView: View {
                 case .shortcuts: ShortcutsPane(store: store)
                 case .modes:     ModesPane(store: store)
                 case .autoMode:  AutoModePane(store: store)
+                case .actions:   ActionsPane(store: store)
                 case .projects:  ProjectsPane(store: store)
                 case .logs:      LogsPane()
                 }
@@ -726,6 +735,237 @@ struct AutoModePane: View {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         return popup.selectedItem?.representedObject as? String
+    }
+}
+
+// MARK: - Actions pane
+
+struct ActionsPane: View {
+    @ObservedObject var store: ConfigStore
+    @State private var editingAction: PostAction? = nil
+    @State private var showEditor = false
+
+    private var actions: [PostAction] {
+        store.draft.postActions.compactMap { PostAction.from($0) }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text("Post-transcription actions").font(.headline)
+                    Spacer()
+                    Button { addAction() } label: { Label("Add action", systemImage: "plus") }
+                }
+                Text("After transcription, Whisper Voice executes the active action. Default is Paste.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                ForEach(actions, id: \.id) { action in
+                    HStack(spacing: 12) {
+                        Image(systemName: action.id == store.draft.activePostActionId ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(action.id == store.draft.activePostActionId ? .blue : .secondary)
+                            .onTapGesture { store.draft.activePostActionId = action.id }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(action.label).bold()
+                            if action.isBuiltIn {
+                                Text(actionTypeLabel(action.type))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text(action.command.isEmpty ? "No command" : action.command)
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer()
+
+                        if !action.isBuiltIn {
+                            Button { editAction(action) } label: {
+                                Image(systemName: "pencil")
+                            }
+                            .buttonStyle(.borderless)
+                            Button(role: .destructive) { removeAction(action) } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+            }
+
+            Section("Variables") {
+                Text("""
+                    Commands receive these environment variables:
+                    $WV_TRANSCRIPTION — processed text
+                    $WV_RAW_TRANSCRIPTION — raw text before mode processing
+                    $WV_APP_BUNDLE_ID — source app bundle ID
+                    $WV_APP_NAME — source app name
+                    $WV_MODE — current mode
+                    $WV_PROJECT — tagged project name
+                    Use $(pbpaste) to include clipboard content.
+                    """)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .formStyle(.grouped)
+        .sheet(isPresented: $showEditor) {
+            ActionEditorSheet(
+                action: editingAction ?? PostAction(id: UUID().uuidString, label: "", type: "command", command: ""),
+                isPresented: $showEditor,
+                isNew: editingAction == nil
+            ) { saved in
+                saveAction(saved)
+            }
+        }
+    }
+
+    private func actionTypeLabel(_ type: String) -> String {
+        switch type {
+        case "paste": return "Paste text at cursor (Cmd+V)"
+        case "pasteEnter": return "Paste text then press Enter"
+        case "command": return "Run shell command"
+        default: return type
+        }
+    }
+
+    private func addAction() {
+        editingAction = nil
+        showEditor = true
+    }
+
+    private func editAction(_ action: PostAction) {
+        editingAction = action
+        showEditor = true
+    }
+
+    private func removeAction(_ action: PostAction) {
+        store.draft.postActions.removeAll { $0["id"] == action.id }
+        if store.draft.activePostActionId == action.id {
+            store.draft.activePostActionId = "builtin-paste"
+        }
+    }
+
+    private func saveAction(_ action: PostAction) {
+        let dict = action.toDict()
+        if let idx = store.draft.postActions.firstIndex(where: { $0["id"] == action.id }) {
+            store.draft.postActions[idx] = dict
+        } else {
+            store.draft.postActions.append(dict)
+        }
+    }
+}
+
+struct ActionEditorSheet: View {
+    @State var action: PostAction
+    @Binding var isPresented: Bool
+    let isNew: Bool
+    let onSave: (PostAction) -> Void
+
+    @State private var testOutput: String = ""
+    @State private var isTesting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(isNew ? "New action" : "Edit action").font(.headline)
+
+            TextField("Name", text: $action.label)
+                .textFieldStyle(.roundedBorder)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Shell command").font(.caption).foregroundStyle(.secondary)
+                TextEditor(text: $action.command)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 80, maxHeight: 160)
+                    .padding(6)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .cornerRadius(6)
+            }
+
+            HStack {
+                Button {
+                    testCommand()
+                } label: {
+                    if isTesting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Test", systemImage: "play.circle")
+                    }
+                }
+                .disabled(action.command.isEmpty || isTesting)
+
+                if !testOutput.isEmpty {
+                    Text(testOutput)
+                        .font(.caption)
+                        .foregroundStyle(testOutput.starts(with: "OK") ? .green : .red)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { isPresented = false }
+                Button("Save") {
+                    if action.label.isEmpty { action.label = "Custom action" }
+                    action.type = "command"
+                    onSave(action)
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(action.command.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 480)
+    }
+
+    private func testCommand() {
+        isTesting = true
+        testOutput = ""
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-c", action.command]
+        var env = ProcessInfo.processInfo.environment
+        env["WV_TRANSCRIPTION"] = "Test transcription from Whisper Voice"
+        env["WV_RAW_TRANSCRIPTION"] = "Test transcription from Whisper Voice"
+        env["WV_APP_BUNDLE_ID"] = "com.example.test"
+        env["WV_APP_NAME"] = "TestApp"
+        env["WV_MODE"] = "brut"
+        env["WV_PROJECT"] = "test-project"
+        process.environment = env
+
+        let errPipe = Pipe()
+        process.standardError = errPipe
+        process.standardOutput = Pipe()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let status = process.terminationStatus
+                let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                DispatchQueue.main.async {
+                    isTesting = false
+                    if status == 0 {
+                        testOutput = "OK (exit 0)"
+                    } else {
+                        testOutput = "Exit \(status): \(stderr.prefix(100))"
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isTesting = false
+                    testOutput = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 }
 

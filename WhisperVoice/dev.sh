@@ -56,9 +56,18 @@ if [ -f "$SCRIPT_DIR/Resources/whisper-server" ]; then
     chmod +x "$APP_PATH/Contents/MacOS/whisper-server"
 fi
 
+# Copy wv-transform helper
+if [ -f "$SCRIPT_DIR/Resources/wv-transform" ]; then
+    echo "Including wv-transform..."
+    cp "$SCRIPT_DIR/Resources/wv-transform" "$APP_PATH/Contents/MacOS/"
+    chmod +x "$APP_PATH/Contents/MacOS/wv-transform"
+fi
+
 # Sign with consistent identity
 echo "Signing..."
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_PATH"
+codesign --force --deep --options runtime \
+    --entitlements "$SCRIPT_DIR/WhisperVoice.entitlements" \
+    --sign "$SIGN_IDENTITY" "$APP_PATH"
 
 # Relaunch
 echo "Launching..."
