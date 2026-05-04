@@ -34,8 +34,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var enterRunLoopSource: CFRunLoopSource?
     private var postActionOverrideId: String?
 
-    // Live transcript via OpenAI Realtime API
-    private var realtimeTranscriber: RealtimeTranscriber?
 
     // Permission wizard
     private var permissionWizard: PermissionWizard?
@@ -690,12 +688,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         recordingWindow?.onPause = { [weak self] in
             self?.audioRecorder.pauseRecording()
-            self?.realtimeTranscriber?.pause()
             LogManager.shared.log("Recording paused")
         }
         recordingWindow?.onResume = { [weak self] in
             self?.audioRecorder.resumeRecording()
-            self?.realtimeTranscriber?.resume()
             LogManager.shared.log("Recording resumed")
         }
         recordingWindow?.onModeChanged = { [weak self] mode in
@@ -852,17 +848,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupCancelHotkey()
         setupModeSwitchMonitor()
         setupEnterToggleMonitor()
-        startLiveTranscript()
     }
 
     private func stopRecording() {
         LogManager.shared.log("Stopping recording")
 
-        // Remove hotkeys
         removeCancelHotkey()
         removeModeSwitchMonitor()
         removeEnterToggleMonitor()
-        stopLiveTranscript()
+
+
 
         guard let audioURL = audioRecorder.stopRecording() else {
             LogManager.shared.log("No audio URL returned from stopRecording", level: "WARNING")
@@ -876,12 +871,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         state = .transcribing
         updateStatusIcon()
         updateStatus("Transcribing...")
-
-        // Hide recording window immediately when stopping
-        // (user feedback: don't show processing state, looks like still listening)
         recordingWindow?.hide()
 
-        // Safety timeout: reset state after 45 seconds if still transcribing
         transcriptionTimeoutTimer?.invalidate()
         transcriptionTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 45.0, repeats: false) { [weak self] _ in
             DispatchQueue.main.async {
@@ -896,7 +887,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Build prompt from custom vocabulary
         let vocabPrompt: String? = {
             guard let vocab = self.config?.customVocabulary, !vocab.isEmpty else { return nil }
             let prompt = vocab.joined(separator: ", ")
@@ -906,31 +896,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         transcriptionProvider?.transcribe(audioURL: audioURL, prompt: vocabPrompt) { [weak self] result in
             DispatchQueue.main.async {
-                // Cancel safety timeout
                 self?.transcriptionTimeoutTimer?.invalidate()
                 self?.transcriptionTimeoutTimer = nil
-
                 self?.audioRecorder.cleanup()
 
                 switch result {
                 case .success(let text):
                     LogManager.shared.log("Transcription complete: \(text.prefix(50))...")
 
-                    // Get the mode that was selected during recording
                     let mode = self?.selectedModeForCurrentRecording ?? ModeManager.shared.currentMode
 
-                    // Check if we need AI processing
                     if mode.requiresProcessing {
                         LogManager.shared.log("Processing with mode: \(mode.name)")
 
-                        // Get API key for OpenAI (for text processing)
                         guard let apiKey = ModeManager.shared.openAIKey else {
                             LogManager.shared.log("No OpenAI API key for processing, using raw text", level: "WARNING")
                             self?.finishWithText(text, rawText: text)
                             return
                         }
 
-                        // Process with GPT
                         TextProcessor.shared.process(
                             text: text,
                             mode: mode,
@@ -951,7 +935,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             }
                         }
                     } else {
-                        // No processing needed, use raw transcription
                         self?.finishWithText(text, rawText: text)
                     }
 
@@ -1032,7 +1015,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         removeCancelHotkey()
         removeModeSwitchMonitor()
         removeEnterToggleMonitor()
-        stopLiveTranscript()
+
 
         // Stop and discard recording
         _ = audioRecorder.stopRecording()
@@ -1049,23 +1032,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Play cancel sound
         NSSound(named: "Basso")?.play()
-    }
-
-    // MARK: - Live Transcript (OpenAI Realtime API)
-
-    private func startLiveTranscript() {
-        guard let apiKey = ModeManager.shared.openAIKey else { return }
-        let transcriber = RealtimeTranscriber()
-        transcriber.onTranscript = { [weak self] text in
-            self?.recordingWindow?.updateTranscript(text)
-        }
-        transcriber.start(apiKey: apiKey, language: "fr", vocabulary: config?.customVocabulary)
-        realtimeTranscriber = transcriber
-    }
-
-    private func stopLiveTranscript() {
-        realtimeTranscriber?.stop()
-        realtimeTranscriber = nil
     }
 
     private func setupCancelHotkey() {

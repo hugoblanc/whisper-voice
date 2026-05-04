@@ -211,10 +211,10 @@ class WaveformView: NSView {
 
     private func colorForLevel(_ level: CGFloat) -> NSColor {
         if level > 0.7 {
-            return NSColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 1.0)
+            return NSColor(red: 1.0, green: 0.65, blue: 0.25, alpha: 1.0)
         } else if level > 0.4 {
             let t = (level - 0.4) / 0.3
-            return NSColor(red: 0.9 + 0.1 * t, green: 0.25 + 0.3 * t, blue: 0.12, alpha: 1.0)
+            return NSColor(red: 1.0, green: 0.42 + 0.23 * t, blue: 0.23 + 0.02 * t, alpha: 1.0)
         } else {
             return baseColor
         }
@@ -287,14 +287,29 @@ final class CapsuleButton: NSView {
     private let iconView = NSImageView()
     private var isPrimary: Bool
     private var isDestructive: Bool
+    private var isGradient: Bool
+    private var gradientLayer: CAGradientLayer?
     private var isHovering: Bool = false { didSet { refreshStyle() } }
     private var isPressed: Bool = false { didSet { refreshStyle() } }
 
-    init(title: String, symbol: String? = nil, isPrimary: Bool = false, isDestructive: Bool = false) {
+    init(title: String, symbol: String? = nil, isPrimary: Bool = false, isDestructive: Bool = false, isGradient: Bool = false) {
         self.isPrimary = isPrimary
         self.isDestructive = isDestructive
+        self.isGradient = isGradient
         super.init(frame: .zero)
         wantsLayer = true
+
+        if isGradient {
+            let gl = CAGradientLayer()
+            gl.colors = [
+                NSColor(red: 1.0, green: 0.42, blue: 0.23, alpha: 1.0).cgColor,
+                NSColor(red: 0.85, green: 0.33, blue: 0.19, alpha: 1.0).cgColor,
+            ]
+            gl.startPoint = CGPoint(x: 0, y: 0.5)
+            gl.endPoint = CGPoint(x: 1, y: 0.5)
+            layer?.addSublayer(gl)
+            gradientLayer = gl
+        }
 
         titleField.stringValue = title
         titleField.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -340,10 +355,22 @@ final class CapsuleButton: NSView {
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = bounds.height / 2
+        let r = bounds.height / 2
+        layer?.cornerRadius = r
+        gradientLayer?.frame = bounds
+        gradientLayer?.cornerRadius = r
     }
 
     private func refreshStyle() {
+        if isGradient {
+            let dim: CGFloat = isPressed ? 0.7 : (isHovering ? 0.85 : 1.0)
+            gradientLayer?.opacity = Float(dim)
+            layer?.borderWidth = 0
+            layer?.backgroundColor = NSColor.clear.cgColor
+            titleField.textColor = .white
+            iconView.contentTintColor = .white
+            return
+        }
         layer?.borderWidth = 1
         if isPrimary {
             let fill = isPressed ? 0.32 : (isHovering ? 0.26 : 0.20)
@@ -409,7 +436,6 @@ class RecordingWindow: NSObject {
     private var projectChip: ProjectChipView!
     private var autoModeLabel: NSTextField!
     private var modeSwitchHint: NSTextField!
-    private var transcriptLabel: NSTextField!
     private var projectPicker: NSPopover?
 
     /// Called when user picks a different project (or nil = untag) for the
@@ -479,7 +505,7 @@ class RecordingWindow: NSObject {
         let tint = NSView(frame: contentView.bounds)
         tint.autoresizingMask = [.width, .height]
         tint.wantsLayer = true
-        tint.layer?.backgroundColor = NSColor(white: 0.0, alpha: 0.18).cgColor
+        tint.layer?.backgroundColor = NSColor(red: 0.06, green: 0.04, blue: 0.02, alpha: 0.35).cgColor
         contentView.addSubview(tint, positioned: .above, relativeTo: effect)
 
         let highlight = CAShapeLayer()
@@ -491,10 +517,18 @@ class RecordingWindow: NSObject {
         highlight.fillColor = NSColor.clear.cgColor
         contentView.layer?.addSublayer(highlight)
 
+        // Inner container for waveform + status row
+        let waveContainer = NSView(frame: NSRect(x: 12, y: 220, width: 356, height: 86))
+        waveContainer.wantsLayer = true
+        waveContainer.layer?.cornerRadius = 14
+        waveContainer.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.04).cgColor
+        waveContainer.layer?.borderWidth = 0.5
+        waveContainer.layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        contentView.addSubview(waveContainer)
+
         waveformView = WaveformView(frame: NSRect(x: 16, y: 252, width: 348, height: 48))
         contentView.addSubview(waveformView)
 
-        // Status row: dot + label + timer
         statusDot = NSView(frame: NSRect(x: 16, y: 230, width: 10, height: 10))
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5
@@ -510,7 +544,7 @@ class RecordingWindow: NSObject {
         timerLabel = NSTextField(labelWithString: "0:00")
         timerLabel.frame = NSRect(x: 308, y: 227, width: 55, height: 18)
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        timerLabel.textColor = NSColor.white.withAlphaComponent(0.65)
+        timerLabel.textColor = NSColor(red: 1.0, green: 0.42, blue: 0.23, alpha: 0.75)
         timerLabel.alignment = .right
         contentView.addSubview(timerLabel)
 
@@ -541,15 +575,6 @@ class RecordingWindow: NSObject {
         autoModeLabel.isHidden = true
         contentView.addSubview(autoModeLabel)
 
-        transcriptLabel = NSTextField(wrappingLabelWithString: "")
-        transcriptLabel.frame = NSRect(x: 16, y: 160, width: 348, height: 56)
-        transcriptLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        transcriptLabel.textColor = NSColor.white.withAlphaComponent(0.45)
-        transcriptLabel.maximumNumberOfLines = 3
-        transcriptLabel.lineBreakMode = .byTruncatingHead
-        transcriptLabel.isHidden = true
-        contentView.addSubview(transcriptLabel)
-
         projectChip = ProjectChipView(frame: NSRect(x: 16, y: 56, width: 348, height: 28))
         projectChip.onClick = { [weak self] in self?.showProjectPicker() }
         contentView.addSubview(projectChip)
@@ -565,7 +590,7 @@ class RecordingWindow: NSObject {
         pauseCapsule.onClick = { [weak self] in self?.pauseResumeClicked() }
         contentView.addSubview(pauseCapsule)
 
-        let stopCapsule = CapsuleButton(title: "Stop", symbol: "stop.fill", isPrimary: true)
+        let stopCapsule = CapsuleButton(title: "Stop", symbol: "stop.fill", isGradient: true)
         stopCapsule.frame = NSRect(x: 274, y: 14, width: 90, height: 32)
         stopCapsule.onClick = { [weak self] in self?.stopClicked() }
         stopCapsule.keyEquivalent = "\r"
@@ -584,8 +609,6 @@ class RecordingWindow: NSObject {
         modeSelector.updateSelection(animated: false)
         autoModeLabel.stringValue = ""
         autoModeLabel.isHidden = true
-        transcriptLabel?.stringValue = ""
-        transcriptLabel?.isHidden = true
         setStatus(.recording)
 
         // Position at top center of main screen
@@ -616,10 +639,11 @@ class RecordingWindow: NSObject {
     func setStatus(_ status: RecordingStatus) {
         switch status {
         case .recording:
-            statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            let accent = NSColor(red: 1.0, green: 0.42, blue: 0.23, alpha: 1.0) // #ff6a3a
+            statusDot.layer?.backgroundColor = accent.cgColor
             statusLabel.stringValue = "Recording"
-            waveformView.baseColor = NSColor.systemRed
-            waveformView.accentColor = NSColor.systemOrange
+            waveformView.baseColor = accent
+            waveformView.accentColor = NSColor(red: 1.0, green: 0.55, blue: 0.35, alpha: 1.0) // #ff8d5a
             pauseCapsuleButton?.setTitle("Pause", symbol: "pause.fill")
             startPulsingDot()
         case .paused:
@@ -649,17 +673,6 @@ class RecordingWindow: NSObject {
 
     func cycleMode() {
         modeSelector.cycleMode()
-    }
-
-    func updateTranscript(_ text: String) {
-        guard let label = transcriptLabel else { return }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            label.isHidden = true
-            return
-        }
-        label.stringValue = trimmed
-        label.isHidden = false
     }
 
     /// Re-highlight the currently active mode (e.g. after auto-mode switched it externally).
