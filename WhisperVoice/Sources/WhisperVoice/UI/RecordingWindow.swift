@@ -340,13 +340,11 @@ final class CapsuleButton: NSView {
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = bounds.height / 2   // fully pill
+        layer?.cornerRadius = bounds.height / 2
     }
 
     private func refreshStyle() {
         layer?.borderWidth = 1
-        // Both variants stay tonal / translucent — no accent-color wash, which
-        // fights the HUD glass aesthetic. Primary = brighter fill + stronger edge.
         if isPrimary {
             let fill = isPressed ? 0.32 : (isHovering ? 0.26 : 0.20)
             layer?.backgroundColor = NSColor.white.withAlphaComponent(CGFloat(fill)).cgColor
@@ -468,9 +466,6 @@ class RecordingWindow: NSObject {
         contentView.layer?.cornerRadius = 20
         contentView.layer?.masksToBounds = true
 
-        // Translucent material base — the "glass" layer. `.fullScreenUI` gives
-        // a heavier blur closer to the native volume/brightness HUD on Tahoe
-        // than `.hudWindow`. `.behindWindow` lets the desktop / apps bleed through.
         let effect = NSVisualEffectView(frame: contentView.bounds)
         effect.autoresizingMask = [.width, .height]
         effect.material = .fullScreenUI
@@ -481,16 +476,12 @@ class RecordingWindow: NSObject {
         effect.layer?.masksToBounds = true
         contentView.addSubview(effect, positioned: .below, relativeTo: nil)
 
-        // Very light darkening just so white text stays readable on bright
-        // wallpapers — 0.18 instead of 0.55 previously (was killing translucency).
         let tint = NSView(frame: contentView.bounds)
         tint.autoresizingMask = [.width, .height]
         tint.wantsLayer = true
         tint.layer?.backgroundColor = NSColor(white: 0.0, alpha: 0.18).cgColor
         contentView.addSubview(tint, positioned: .above, relativeTo: effect)
 
-        // Glass highlight: brighter 1px stroke + subtle inner glow layer for
-        // refraction feel — much closer to macOS Tahoe's native HUDs.
         let highlight = CAShapeLayer()
         let strokeRect = contentView.bounds.insetBy(dx: 0.5, dy: 0.5)
         highlight.frame = contentView.bounds
@@ -550,7 +541,6 @@ class RecordingWindow: NSObject {
         autoModeLabel.isHidden = true
         contentView.addSubview(autoModeLabel)
 
-        // Live transcript — shows partial transcription as user speaks
         transcriptLabel = NSTextField(wrappingLabelWithString: "")
         transcriptLabel.frame = NSRect(x: 16, y: 160, width: 348, height: 56)
         transcriptLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
@@ -814,6 +804,7 @@ class ProjectChipView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+
         layer?.cornerRadius = 6
         layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.08).cgColor
 
