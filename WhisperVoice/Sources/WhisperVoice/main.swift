@@ -22,6 +22,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pttGlobalKeyUpMonitor: Any?
     private var pttLocalMonitor: Any?
 
+    // Spell correction monitors
+    private var spellCorrectionGlobalMonitor: Any?
+    private var spellCorrectionLocalMonitor: Any?
+    private var isSpellCorrecting = false
+
     // Cancel monitor (Escape key)
     private var cancelGlobalMonitor: Any?
     private var cancelLocalMonitor: Any?
@@ -56,6 +61,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Menu items that need updating
     private var toggleShortcutMenuItem: NSMenuItem?
     private var pttMenuItem: NSMenuItem?
+    private var spellCorrectionMenuItem: NSMenuItem?
 
     private enum AppState {
         case idle, recording, transcribing
@@ -223,6 +229,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pttMenuItem = NSMenuItem(title: "\(config.pushToTalkDescription()) to record", action: nil, keyEquivalent: "")
         menu.addItem(pttMenuItem!)
 
+        spellCorrectionMenuItem = NSMenuItem(title: "\(config.spellCorrectionShortcutDescription()) to correct selection", action: nil, keyEquivalent: "")
+        menu.addItem(spellCorrectionMenuItem!)
+
         menu.addItem(NSMenuItem.separator())
 
         let statusMenuItem = NSMenuItem(title: "Status: Idle", action: nil, keyEquivalent: "")
@@ -282,9 +291,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
 
-        // Setup both hotkeys (toggle + push-to-talk)
+        // Setup both hotkeys (toggle + push-to-talk + spell correction)
         setupToggleHotkey()
         setupPushToTalkHotkey()
+        setupSpellCorrectionHotkey()
 
         LogManager.shared.log("App started - Provider: \(transcriptionProvider?.displayName ?? "unknown")")
         print("Whisper Voice started (dual mode: toggle + push-to-talk)")
@@ -422,6 +432,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 shortcutKeyCode: UInt32(kVK_Space),
                 pushToTalkKeyCode: pttKeyCode,
                 pushToTalkModifiers: 0,
+                spellCorrectionKeyCode: UInt32(kVK_ANSI_C),
+                spellCorrectionModifiers: UInt32(optionKey | controlKey),
                 whisperCliPath: "",
                 whisperModelPath: "",
                 whisperLanguage: "fr",
@@ -656,6 +668,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
             return event
+        }
+    }
+
+    // MARK: - Spell Correction (dedicated shortcut, no recording)
+
+    private func setupSpellCorrectionHotkey() {
+        guard let config = config else { return }
+        let keyCode = UInt16(config.spellCorrectionKeyCode)
+        let mods = config.spellCorrectionModifiers
+
+        let matches: (NSEvent) -> Bool = { event in
+            guard event.keyCode == keyCode else { return false }
+            let eventMods = carbonModifiers(from: event.modifierFlags.rawValue)
+            return (eventMods & mods) == mods && (eventMods & ~mods) == 0
+        }
+
+        spellCorrectionGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if matches(event) {
+                DispatchQueue.main.async { self?.triggerSpellCorrection() }
+            }
+        }
+        spellCorrectionLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if matches(event) {
+                DispatchQueue.main.async { self?.triggerSpellCorrection() }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func triggerSpellCorrection() {
+        guard state == .idle && !isSpellCorrecting else { return }
+
+        guard let apiKey = ModeManager.shared.openAIKey else {
+            showNotification(title: "Correction d'orthographe", message: "Clé OpenAI requise pour ce mode")
+            return
+        }
+
+        guard let selectedText = captureSelectedText(), !selectedText.isEmpty else {
+            showNotification(title: "Correction d'orthographe", message: "Aucun texte sélectionné")
+            return
+        }
+
+        isSpellCorrecting = true
+        updateStatus("Correcting...")
+        LogManager.shared.log("[SpellCorrection] Correcting \(selectedText.count) chars")
+
+        TextProcessor.shared.process(
+            text: selectedText,
+            mode: ModeManager.spellCorrectionMode,
+            apiKey: apiKey
+        ) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.isSpellCorrecting = false
+                self?.updateStatus("Idle")
+                switch result {
+                case .success(let corrected):
+                    pasteText(corrected)
+                    NSSound(named: "Glass")?.play()
+                    LogManager.shared.log("[SpellCorrection] Done: \(selectedText.count) → \(corrected.count) chars")
+                case .failure(let error):
+                    self?.showNotification(title: "Correction d'orthographe", message: error.localizedDescription)
+                    LogManager.shared.log("[SpellCorrection] Failed: \(error.localizedDescription)", level: "ERROR")
+                }
+            }
         }
     }
 
@@ -1235,7 +1312,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                               config?.getCurrentApiKey() != newConfig.getCurrentApiKey()
         let shortcutsChanged = config?.shortcutModifiers != newConfig.shortcutModifiers ||
                                config?.shortcutKeyCode != newConfig.shortcutKeyCode ||
-                               config?.pushToTalkKeyCode != newConfig.pushToTalkKeyCode
+                               config?.pushToTalkKeyCode != newConfig.pushToTalkKeyCode ||
+                               config?.spellCorrectionKeyCode != newConfig.spellCorrectionKeyCode ||
+                               config?.spellCorrectionModifiers != newConfig.spellCorrectionModifiers
 
         self.config = newConfig
 
@@ -1284,16 +1363,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let m = pttGlobalKeyDownMonitor { NSEvent.removeMonitor(m) }
         if let m = pttGlobalKeyUpMonitor { NSEvent.removeMonitor(m) }
         if let m = pttLocalMonitor { NSEvent.removeMonitor(m) }
+        if let m = spellCorrectionGlobalMonitor { NSEvent.removeMonitor(m) }
+        if let m = spellCorrectionLocalMonitor { NSEvent.removeMonitor(m) }
 
         toggleGlobalMonitor = nil
         toggleLocalMonitor = nil
         pttGlobalKeyDownMonitor = nil
         pttGlobalKeyUpMonitor = nil
         pttLocalMonitor = nil
+        spellCorrectionGlobalMonitor = nil
+        spellCorrectionLocalMonitor = nil
 
         // Re-setup hotkeys
         setupToggleHotkey()
         setupPushToTalkHotkey()
+        setupSpellCorrectionHotkey()
 
         LogManager.shared.log("Hotkeys reloaded: Toggle=\(config?.toggleShortcutDescription() ?? "?"), PTT=\(config?.pushToTalkDescription() ?? "?")")
     }
@@ -1302,6 +1386,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let config = config else { return }
         toggleShortcutMenuItem?.title = "\(config.toggleShortcutDescription()) to toggle"
         pttMenuItem?.title = "\(config.pushToTalkDescription()) to record"
+        spellCorrectionMenuItem?.title = "\(config.spellCorrectionShortcutDescription()) to correct selection"
     }
 
     @objc private func checkForUpdates() {

@@ -116,6 +116,22 @@ class ModeManager {
         )
     ]
 
+    /// Standalone spell-correction mode — used by the dedicated shortcut, not in the recording cycle.
+    static let spellCorrectionMode = ProcessingMode(
+        id: "spell-correction",
+        name: "Correction",
+        icon: "text.badge.checkmark",
+        systemPrompt: """
+        Tu es un assistant spécialisé dans la correction orthographique et grammaticale.
+        Règles :
+        - Corrige toutes les fautes d'orthographe et de grammaire
+        - Corrige la ponctuation si nécessaire
+        - Garde le sens, le ton et le style exact du texte original
+        - Ne reformule PAS, ne résume PAS, ne change PAS le registre
+        - Réponds UNIQUEMENT avec le texte corrigé, rien d'autre
+        """
+    )
+
     private(set) var modes: [ProcessingMode] = ModeManager.builtInModes
 
     private(set) var currentModeIndex: Int = 0
