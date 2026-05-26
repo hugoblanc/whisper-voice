@@ -782,6 +782,60 @@
     color: var(--text-faint);
   }
 
+  /* ─── Releases list ──────────────────────────────────────── */
+  .releases-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    margin-top: 40px;
+  }
+  .release-card {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 20px 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: border-color 0.2s var(--ease);
+  }
+  .release-card:hover { border-color: var(--border-2); }
+  .release-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .release-title {
+    font-size: 14px;
+    color: var(--text-dim);
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .release-links {
+    display: flex;
+    gap: 10px;
+    white-space: nowrap;
+  }
+  .release-links a {
+    font-size: 12px;
+    color: var(--text-faint);
+    text-decoration: none;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    transition: all 0.15s var(--ease);
+  }
+  .release-links a:hover {
+    color: var(--text);
+    border-color: var(--border-2);
+    background: var(--surface-2);
+  }
+
   /* ─── Footer ─────────────────────────────────────────────── */
   footer {
     padding: 48px 0 32px;
@@ -872,11 +926,11 @@
       </div>
 
       <div class="cta-row">
-        <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-AppleSilicon.dmg" class="btn btn-primary">
+        <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-AppleSilicon.dmg" class="btn btn-primary">
           Download for Apple Silicon
           <small>M1 · M2 · M3 · M4 — universal DMG</small>
         </a>
-        <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-Intel.dmg" class="btn btn-ghost">
+        <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-Intel.dmg" class="btn btn-ghost">
           Intel Mac
           <small>x86_64</small>
         </a>
@@ -1255,15 +1309,99 @@
         <h2>Stop paying for an <em>API wrapper</em>.</h2>
         <p>4 MB. Free forever. Your keys, your data, your Mac.</p>
         <div class="cta-row">
-          <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-AppleSilicon.dmg" class="btn btn-primary">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-AppleSilicon.dmg" class="btn btn-primary">
             Download for Apple Silicon
           </a>
-          <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-3.6.1-Intel.dmg" class="btn btn-ghost">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/latest/download/WhisperVoice-Intel.dmg" class="btn btn-ghost">
             Intel Mac
           </a>
         </div>
         <div class="final-cta-sub">
-          v3.6.1 · Signed + notarized by Apple · macOS 13+ · <a href="https://github.com/hugoblanc/whisper-voice" style="color: var(--text-dim); text-decoration: underline;">Source on GitHub</a>
+          v3.7.0 · Signed + notarized by Apple · macOS 13+ · <a href="https://github.com/hugoblanc/whisper-voice" style="color: var(--text-dim); text-decoration: underline;">Source on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────────────────────────────────── -->
+  <!-- ALL RELEASES -->
+  <!-- ──────────────────────────────────────────────────── -->
+  <section id="releases">
+    <div class="wrap">
+      <div class="section-label">All releases</div>
+      <h2 class="section-title">Every version, <em>always</em> available.</h2>
+      <p class="section-sub">Direct download links that won't break. Each release is signed and notarized by Apple.</p>
+
+      <div class="releases-grid">
+        <div class="release-card">
+          <span class="release-tag">v3.7.0</span>
+          <span class="release-title">Retry strategies, audio persistence & import</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.7.0/WhisperVoice-3.7.0-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.7.0/WhisperVoice-3.7.0-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.6.1</span>
+          <span class="release-title">Notarization fix (critical for new installs)</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.1/WhisperVoice-3.6.1-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.1/WhisperVoice-3.6.1-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.6.0</span>
+          <span class="release-title">SwiftUI Preferences, modern menu, polished editors</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.0/WhisperVoice-3.6.0-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.0/WhisperVoice-3.6.0-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.5.0</span>
+          <span class="release-title">Auto-mode, HTML clipboard, pipeline audit logs</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.5.0/WhisperVoice-3.5.0-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.5.0/WhisperVoice-3.5.0-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.4.0</span>
+          <span class="release-title">Dictation context, JSONL export, custom shortcuts</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.4.0/WhisperVoice-3.4.0-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.4.0/WhisperVoice-3.4.0-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.2.0</span>
+          <span class="release-title">Custom Vocabulary, Custom Modes, Super Mode</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.2.0/WhisperVoice-3.2.0-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.2.0/WhisperVoice-3.2.0-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.1.0</span>
+          <span class="release-title">Offline Mode with whisper.cpp</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.1.0/WhisperVoice-3.1.0-AppleSilicon.dmg">Apple Silicon</a>
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.1.0/WhisperVoice-3.1.0-Intel.dmg">Intel</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v3.0.0</span>
+          <span class="release-title">AI Processing Modes</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.0.0/WhisperVoice-3.0.0.dmg">Universal</a>
+          </div>
+        </div>
+        <div class="release-card">
+          <span class="release-tag">v2.3.0</span>
+          <span class="release-title">Whisper Voice 2.3.0</span>
+          <div class="release-links">
+            <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v2.3.0/WhisperVoice-2.3.0.dmg">Universal</a>
+          </div>
         </div>
       </div>
     </div>

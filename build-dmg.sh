@@ -199,6 +199,11 @@ fi
 cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-AppleSilicon.dmg"
 cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-${VERSION}-Intel.dmg"
 
+# Stable-named copies so /releases/latest/download/WhisperVoice-AppleSilicon.dmg
+# always resolves without updating the landing page on each release.
+cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-AppleSilicon.dmg"
+cp "$BUILD_DIR/$DMG_NAME" "$BUILD_DIR/WhisperVoice-Intel.dmg"
+
 # Final Gatekeeper assessments — DMGs use --type install, the .app uses
 # --type exec (default). Both should report "accepted"/"Notarized Developer ID".
 echo ""
