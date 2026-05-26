@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>All Releases — Whisper Voice</title>
+<meta name="description" content="Download any version of Whisper Voice. Direct links to every signed and notarized DMG." />
+
+<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/hugoblanc/whisper-voice/main/logo_whisper_voice.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg:          #09080c;
+    --bg-2:        #0e0d14;
+    --surface:     rgba(255, 255, 255, 0.04);
+    --surface-2:   rgba(255, 255, 255, 0.08);
+    --border:      rgba(255, 255, 255, 0.09);
+    --border-2:    rgba(255, 255, 255, 0.14);
+    --text:        #f4ecde;
+    --text-dim:    rgba(244, 236, 222, 0.62);
+    --text-faint:  rgba(244, 236, 222, 0.38);
+    --accent:      #ff6a3a;
+    --accent-2:    #ff8d5a;
+    --accent-soft: rgba(255, 106, 58, 0.15);
+    --radius-sm:   10px;
+    --radius-md:   16px;
+    --radius-lg:   24px;
+    --ease:        cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+  .back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 14px;
+    margin-top: 40px;
+    transition: color 0.15s;
+  }
+  .back:hover { color: var(--text); }
+
+  header {
+    padding: 48px 0 40px;
+  }
+  header h1 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: clamp(36px, 5vw, 52px);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  header h1 em { color: var(--accent); font-style: italic; }
+  header p {
+    font-size: 16px;
+    color: var(--text-dim);
+    max-width: 560px;
+  }
+
+  .releases { padding-bottom: 80px; }
+
+  .release-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 24px 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    transition: border-color 0.2s var(--ease);
+  }
+  .release-card:hover { border-color: var(--border-2); }
+
+  .release-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .release-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .release-links {
+    display: flex;
+    gap: 10px;
+  }
+  .release-links a {
+    font-size: 13px;
+    color: var(--text-faint);
+    text-decoration: none;
+    padding: 5px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: all 0.15s var(--ease);
+  }
+  .release-links a:hover {
+    color: var(--text);
+    border-color: var(--border-2);
+    background: var(--surface-2);
+  }
+  .release-title {
+    font-size: 15px;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+
+  .release-card.latest {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .release-card.latest .release-links a {
+    border-color: rgba(255, 106, 58, 0.3);
+  }
+  .release-card.latest .release-links a:hover {
+    background: rgba(255, 106, 58, 0.15);
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .badge-latest {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    font-weight: 600;
+    background: rgba(255, 106, 58, 0.12);
+    padding: 3px 10px;
+    border-radius: 6px;
+  }
+
+  footer {
+    padding: 32px 0;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  footer a { color: var(--text-dim); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <a href="./" class="back">&larr; Back to Whisper Voice</a>
+</div>
+
+<header>
+  <div class="wrap">
+    <h1>All <em>releases</em></h1>
+    <p>Direct download links that won't break. Every release is signed and notarized by Apple. Pick your version.</p>
+  </div>
+</header>
+
+<div class="releases">
+  <div class="wrap">
+
+    <div class="release-card latest">
+      <div class="release-header">
+        <span class="release-tag">v3.7.0</span>
+        <span class="badge-latest">Latest</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.7.0/WhisperVoice-3.7.0-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.7.0/WhisperVoice-3.7.0-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">Retry strategies, audio persistence & import</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.6.1</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.1/WhisperVoice-3.6.1-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.1/WhisperVoice-3.6.1-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">Notarization fix (critical for new installs)</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.6.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.0/WhisperVoice-3.6.0-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.6.0/WhisperVoice-3.6.0-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">SwiftUI Preferences, modern menu, polished editors</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.5.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.5.0/WhisperVoice-3.5.0-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.5.0/WhisperVoice-3.5.0-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">Auto-mode, HTML clipboard, pipeline audit logs</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.4.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.4.0/WhisperVoice-3.4.0-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.4.0/WhisperVoice-3.4.0-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">Dictation context, JSONL export, custom shortcuts, mic entitlements fix</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.2.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.2.0/WhisperVoice-3.2.0-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.2.0/WhisperVoice-3.2.0-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">Custom Vocabulary, Custom Modes, Super Mode, Auto-Update</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.1.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.1.0/WhisperVoice-3.1.0-AppleSilicon.dmg">Apple Silicon</a>
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.1.0/WhisperVoice-3.1.0-Intel.dmg">Intel</a>
+        </div>
+      </div>
+      <div class="release-title">Offline Mode with whisper.cpp</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v3.0.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v3.0.0/WhisperVoice-3.0.0.dmg">Universal</a>
+        </div>
+      </div>
+      <div class="release-title">AI Processing Modes</div>
+    </div>
+
+    <div class="release-card">
+      <div class="release-header">
+        <span class="release-tag">v2.3.0</span>
+        <div class="release-links">
+          <a href="https://github.com/hugoblanc/whisper-voice/releases/download/v2.3.0/WhisperVoice-2.3.0.dmg">Universal</a>
+        </div>
+      </div>
+      <div class="release-title">Whisper Voice 2.3.0</div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    &copy; 2026 Whisper Voice &middot; MIT license &middot; <a href="./">Home</a> &middot; <a href="https://github.com/hugoblanc/whisper-voice">GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>
