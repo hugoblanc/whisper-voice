@@ -66,7 +66,7 @@ class BaseTranscriptionProvider {
         pow(2.0, Double(attempt - 1))
     }
 
-    func createMultipartBody(boundary: String, audioData: Data, model: String, prompt: String? = nil) -> Data {
+    func createMultipartBody(boundary: String, audioData: Data, model: String, prompt: String? = nil, audioURL: URL? = nil) -> Data {
         var body = Data()
 
         // Model field
@@ -81,14 +81,29 @@ class BaseTranscriptionProvider {
             body.append("\(prompt)\r\n".data(using: .utf8)!)
         }
 
-        // Audio file
+        // Audio file — derive filename and MIME from the source URL when available
+        let filename = audioURL?.lastPathComponent ?? "audio.wav"
+        let mimeType = Self.mimeType(for: audioURL?.pathExtension ?? "wav")
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
 
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         return body
+    }
+
+    private static func mimeType(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "wav": return "audio/wav"
+        case "mp3": return "audio/mpeg"
+        case "m4a", "mp4", "aac": return "audio/mp4"
+        case "ogg", "oga": return "audio/ogg"
+        case "flac": return "audio/flac"
+        case "webm": return "audio/webm"
+        case "aiff", "aif": return "audio/aiff"
+        default: return "application/octet-stream"
+        }
     }
 }

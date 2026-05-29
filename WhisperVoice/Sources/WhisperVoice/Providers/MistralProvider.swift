@@ -46,7 +46,7 @@ class MistralProvider: BaseTranscriptionProvider, TranscriptionProvider {
             return
         }
 
-        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model, prompt: prompt)
+        request.httpBody = createMultipartBody(boundary: boundary, audioData: audioData, model: model, prompt: prompt, audioURL: audioURL)
 
         LogManager.shared.log("[\(self.displayName)] Sending request (attempt \(attempt))...")
 

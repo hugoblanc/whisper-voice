@@ -49,7 +49,8 @@ class RecordingStore {
 
     func saveRecording(from tempURL: URL, duration: Double, provider: String, modeName: String) -> RecordingMetadata? {
         let id = UUID()
-        let filename = "recording_\(id.uuidString).wav"
+        let ext = tempURL.pathExtension.isEmpty ? "wav" : tempURL.pathExtension.lowercased()
+        let filename = "recording_\(id.uuidString).\(ext)"
         let destURL = recordingsDir.appendingPathComponent(filename)
 
         do {

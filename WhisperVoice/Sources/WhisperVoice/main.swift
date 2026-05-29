@@ -1233,11 +1233,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let panel = NSOpenPanel()
         panel.title = "Import Audio File"
-        var types: [UTType] = [.wav, .mp3, .mpeg4Audio, .aiff, .audio]
-        for ext in ["ogg", "webm", "m4a", "flac"] {
+        var types: [UTType] = [.audio]
+        for ext in AudioImporter.pickerExtensions {
             if let t = UTType(filenameExtension: ext) { types.append(t) }
         }
         panel.allowedContentTypes = types
+        panel.allowsOtherFileTypes = true
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
 
@@ -1255,33 +1256,51 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         state = .transcribing
         updateStatusIcon()
-        updateStatus("Transcribing imported audio...")
+        updateStatus("Preparing imported audio...")
 
         let vocabPrompt: String? = {
             guard !config.customVocabulary.isEmpty else { return nil }
             return config.customVocabulary.joined(separator: ", ")
         }()
 
-        provider.transcribe(audioURL: url, prompt: vocabPrompt) { [weak self] result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let text):
-                    LogManager.shared.log("[Import] Transcription successful: \(text.prefix(80))...")
-                    if let id = savedRecording?.id { RecordingStore.shared.markSuccess(id: id, text: text) }
-
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(text, forType: .string)
-                    self?.showNotification(title: "Import Complete", message: "Transcription copied to clipboard")
-
-                case .failure(let error):
-                    LogManager.shared.log("[Import] Transcription failed: \(error.localizedDescription)", level: "ERROR")
+        AudioImporter.prepare(url) { [weak self] prepResult in
+            switch prepResult {
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    LogManager.shared.log("[Import] Audio preparation failed: \(error.localizedDescription)", level: "ERROR")
                     if let id = savedRecording?.id { RecordingStore.shared.markFailed(id: id, error: error.localizedDescription) }
                     self?.showNotification(title: "Import Error", message: error.localizedDescription)
+                    self?.state = .idle
+                    self?.updateStatusIcon()
+                    self?.updateStatus("Idle")
                 }
-                self?.state = .idle
-                self?.updateStatusIcon()
-                self?.updateStatus("Idle")
+            case .success(let prepared):
+                DispatchQueue.main.async { self?.updateStatus("Transcribing imported audio...") }
+                provider.transcribe(audioURL: prepared.url, prompt: vocabPrompt) { result in
+                    if prepared.isTemporary {
+                        try? FileManager.default.removeItem(at: prepared.url)
+                    }
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .success(let text):
+                            LogManager.shared.log("[Import] Transcription successful: \(text.prefix(80))...")
+                            if let id = savedRecording?.id { RecordingStore.shared.markSuccess(id: id, text: text) }
+
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(text, forType: .string)
+                            self?.showNotification(title: "Import Complete", message: "Transcription copied to clipboard")
+
+                        case .failure(let error):
+                            LogManager.shared.log("[Import] Transcription failed: \(error.localizedDescription)", level: "ERROR")
+                            if let id = savedRecording?.id { RecordingStore.shared.markFailed(id: id, error: error.localizedDescription) }
+                            self?.showNotification(title: "Import Error", message: error.localizedDescription)
+                        }
+                        self?.state = .idle
+                        self?.updateStatusIcon()
+                        self?.updateStatus("Idle")
+                    }
+                }
             }
         }
     }
