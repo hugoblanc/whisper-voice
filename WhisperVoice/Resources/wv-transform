@@ -1,0 +1,73 @@
+#!/bin/zsh
+# wv-transform — WhisperVoice AI transform helper
+# Usage: wv-transform "Your system prompt here"
+# Reads WV_TRANSCRIPTION and WV_API_KEY from environment
+# Outputs transformed text to stdout
+
+set -euo pipefail
+
+PROMPT="$1"
+TEXT="${WV_TRANSCRIPTION:-}"
+API_KEY="${WV_API_KEY:-}"
+PROVIDER="${WV_PROVIDER:-openai}"
+
+if [[ -z "$TEXT" ]]; then
+    echo "$TEXT"
+    exit 0
+fi
+
+if [[ -z "$API_KEY" ]]; then
+    echo "Error: No API key configured" >&2
+    exit 1
+fi
+
+case "$PROVIDER" in
+    openai|mistral)
+        if [[ "$PROVIDER" == "mistral" ]]; then
+            URL="https://api.mistral.ai/v1/chat/completions"
+            MODEL="mistral-small-latest"
+        else
+            URL="https://api.openai.com/v1/chat/completions"
+            MODEL="gpt-4o-mini"
+        fi
+        BODY=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'model': '$MODEL',
+    'temperature': 0.3,
+    'messages': [
+        {'role': 'system', 'content': sys.argv[1]},
+        {'role': 'user', 'content': sys.argv[2]}
+    ]
+}))
+" "$PROMPT" "$TEXT")
+        RESULT=$(curl -sS "$URL" \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+        echo "$RESULT" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['choices'][0]['message']['content'])"
+        ;;
+    anthropic)
+        BODY=$(python3 -c "
+import json, sys
+print(json.dumps({
+    'model': 'claude-haiku-4-5-20251001',
+    'max_tokens': 4096,
+    'system': sys.argv[1],
+    'messages': [
+        {'role': 'user', 'content': sys.argv[2]}
+    ]
+}))
+" "$PROMPT" "$TEXT")
+        RESULT=$(curl -sS "https://api.anthropic.com/v1/messages" \
+            -H "x-api-key: $API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+        echo "$RESULT" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['content'][0]['text'])"
+        ;;
+    *)
+        echo "Unsupported provider: $PROVIDER" >&2
+        exit 1
+        ;;
+esac

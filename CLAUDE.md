@@ -85,15 +85,14 @@ Modifier values:
 Logs location: `~/Library/Application Support/WhisperVoice/logs.txt`
 
 ## Building
-```bash
-cd WhisperVoice
-swift build -c release
-```
 
-Build DMG:
-```bash
-./build-dmg.sh
-```
+| When | Script | What it does |
+|---|---|---|
+| Fast local iteration (default) | `WhisperVoice/dev.sh` | Builds release, swaps the binary inside `/Applications/Whisper Voice.app`, signs with the **Apple Development** identity + entitlements. Same identity every rebuild → **macOS TCC permissions survive** (no need to re-grant Mic / Accessibility / Input Monitoring). |
+| "Distribution-shaped" test | `./update.sh` | Same swap but signs with the **Developer ID Application** identity + entitlements + `--options runtime` + `--timestamp`. The new CDHash invalidates TCC, so you'll re-grant permissions after. Use only when you specifically need to test the Gatekeeper-distribution code path locally. |
+| Shipping a release | `./build-dmg.sh` | Universal arm64+x86_64 build, signs Developer ID, notarizes, staples, produces DMGs in `build/`. |
+
+`dev.sh` is the right default — picking `update.sh` when you mean "rebuild quickly" forces a needless TCC re-grant every iteration. Both also bundle `WhisperVoice/Resources/wv-transform` (a zsh helper for the post-transcription "command" action) into the app at `Contents/MacOS/wv-transform`.
 
 ## App Bundle Location
 `/Applications/Whisper Voice.app` (canonical). Never keep duplicate copies in `~/Applications/` or `build/` — each copy is a distinct TCC identity, and `tccutil reset` then reports multiple stale entries for the same bundle ID.
