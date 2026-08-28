@@ -57,6 +57,7 @@ final class ConfigStore: ObservableObject {
             provider: "openai", apiKey: "", providerApiKeys: [:],
             shortcutModifiers: UInt32(optionKey), shortcutKeyCode: UInt32(kVK_Space),
             pushToTalkKeyCode: UInt32(kVK_F3), pushToTalkModifiers: 0,
+            spellCorrectionKeyCode: UInt32(kVK_ANSI_C), spellCorrectionModifiers: UInt32(optionKey | controlKey),
             whisperCliPath: "", whisperModelPath: "", whisperLanguage: "fr",
             customVocabulary: [], customModes: [],
             disabledBuiltInModeIds: [],
@@ -83,6 +84,8 @@ extension Config {
             && shortcutKeyCode == other.shortcutKeyCode
             && pushToTalkKeyCode == other.pushToTalkKeyCode
             && pushToTalkModifiers == other.pushToTalkModifiers
+            && spellCorrectionKeyCode == other.spellCorrectionKeyCode
+            && spellCorrectionModifiers == other.spellCorrectionModifiers
             && whisperLanguage == other.whisperLanguage
             && whisperModelPath == other.whisperModelPath
             && customVocabulary == other.customVocabulary

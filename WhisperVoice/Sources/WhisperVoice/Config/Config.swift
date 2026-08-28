@@ -55,6 +55,10 @@ struct Config {
     var pushToTalkKeyCode: UInt32  // e.g., kVK_F3
     var pushToTalkModifiers: UInt32  // 0 = bare key
 
+    // Spell correction shortcut
+    var spellCorrectionKeyCode: UInt32    // default kVK_ANSI_C
+    var spellCorrectionModifiers: UInt32  // default optionKey | shiftKey
+
     // Local whisper.cpp settings
     var whisperCliPath: String     // Path to whisper-cli binary
     var whisperModelPath: String   // Path to ggml model file
@@ -119,6 +123,8 @@ struct Config {
         let keyCode = json["shortcutKeyCode"] as? UInt32 ?? UInt32(kVK_Space)
         let pttKeyCode = json["pushToTalkKeyCode"] as? UInt32 ?? UInt32(kVK_F3)
         let pttModifiers = normalizeModifiers(json["pushToTalkModifiers"] as? UInt32 ?? 0)
+        let spellCorrectionKeyCode = json["spellCorrectionKeyCode"] as? UInt32 ?? UInt32(kVK_ANSI_C)
+        let spellCorrectionModifiers = normalizeModifiers(json["spellCorrectionModifiers"] as? UInt32 ?? UInt32(optionKey | controlKey))
 
         // Local whisper.cpp settings
         let whisperCliPath = json["whisperCliPath"] as? String ?? ""
@@ -167,6 +173,8 @@ struct Config {
             shortcutKeyCode: keyCode,
             pushToTalkKeyCode: pttKeyCode,
             pushToTalkModifiers: pttModifiers,
+            spellCorrectionKeyCode: spellCorrectionKeyCode,
+            spellCorrectionModifiers: spellCorrectionModifiers,
             whisperCliPath: whisperCliPath,
             whisperModelPath: whisperModelPath,
             whisperLanguage: whisperLanguage,
@@ -193,7 +201,9 @@ struct Config {
             "shortcutModifiers": shortcutModifiers,
             "shortcutKeyCode": shortcutKeyCode,
             "pushToTalkKeyCode": pushToTalkKeyCode,
-            "pushToTalkModifiers": pushToTalkModifiers
+            "pushToTalkModifiers": pushToTalkModifiers,
+            "spellCorrectionKeyCode": spellCorrectionKeyCode,
+            "spellCorrectionModifiers": spellCorrectionModifiers
         ]
         if !providerApiKeys.isEmpty {
             json["providerApiKeys"] = providerApiKeys
@@ -277,6 +287,16 @@ struct Config {
 
     func pushToTalkDescription() -> String {
         return keyCodeToString(pushToTalkKeyCode) + " (hold)"
+    }
+
+    func spellCorrectionShortcutDescription() -> String {
+        var parts: [String] = []
+        if spellCorrectionModifiers & UInt32(cmdKey) != 0 { parts.append("Cmd") }
+        if spellCorrectionModifiers & UInt32(shiftKey) != 0 { parts.append("Shift") }
+        if spellCorrectionModifiers & UInt32(optionKey) != 0 { parts.append("Option") }
+        if spellCorrectionModifiers & UInt32(controlKey) != 0 { parts.append("Control") }
+        parts.append(keyCodeToString(spellCorrectionKeyCode))
+        return parts.joined(separator: "+")
     }
 }
 
