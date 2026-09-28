@@ -9,7 +9,10 @@ struct UpdateInfo {
 }
 
 class UpdateChecker {
-    static let currentVersion = "3.7.0"
+    /// Read from the bundle so it can't drift from Info.plist: a hardcoded
+    /// "3.7.0" shipped in 3.8.0 and 3.9.0, which made those builds offer
+    /// themselves as an update forever.
+    static let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     private static let repoOwner = "hugoblanc"
     private static let repoName = "whisper-voice"
 

@@ -12,7 +12,7 @@ BOLD='\033[1m'
 
 # Config
 APP_NAME="Whisper Voice"
-VERSION="3.9.0"
+VERSION="3.9.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/WhisperVoice"
 BUILD_DIR="$SCRIPT_DIR/build"
