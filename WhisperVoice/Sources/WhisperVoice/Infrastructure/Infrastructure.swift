@@ -8,6 +8,12 @@ let logger = Logger(subsystem: "com.whispervoice", category: "main")
 class LogManager {
     static let shared = LogManager()
 
+    /// Set by the MCP server process before its first log. logs.txt is rewritten
+    /// whole from memory on every entry, so a second process writing it would
+    /// erase the app's lines; and stdout is reserved for protocol messages.
+    /// In that mode entries go to stderr, which MCP clients keep as the server log.
+    static var writesToStderr = false
+
     private let logFileURL: URL
     private var logEntries: [String] = []
     private let maxLogEntries = 1000
@@ -42,6 +48,11 @@ class LogManager {
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let timestamp = dateFormatter.string(from: Date())
         let entry = "\(timestamp) [\(level)] \(message)"
+
+        if Self.writesToStderr {
+            FileHandle.standardError.write(Data((entry + "\n").utf8))
+            return
+        }
 
         queue.async { [weak self] in
             guard let self = self else { return }

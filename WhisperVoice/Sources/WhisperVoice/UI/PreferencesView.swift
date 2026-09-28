@@ -152,7 +152,7 @@ struct ShortcutRecorderRepresentable: NSViewRepresentable {
 // MARK: - Preferences root
 
 enum PreferencePane: String, CaseIterable, Identifiable {
-    case general, shortcuts, modes, autoMode, actions, projects, recordings, logs
+    case general, shortcuts, modes, autoMode, actions, projects, recordings, mcp, logs
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -163,6 +163,7 @@ enum PreferencePane: String, CaseIterable, Identifiable {
         case .actions: return "Actions"
         case .projects: return "Projects"
         case .recordings: return "Recordings"
+        case .mcp: return "AI assistants"
         case .logs: return "Logs"
         }
     }
@@ -175,6 +176,7 @@ enum PreferencePane: String, CaseIterable, Identifiable {
         case .actions: return "bolt.circle"
         case .projects: return "folder"
         case .recordings: return "waveform.circle"
+        case .mcp: return "puzzlepiece.extension"
         case .logs: return "doc.text.magnifyingglass"
         }
     }
@@ -201,6 +203,7 @@ struct PreferencesView: View {
                 case .actions:   ActionsPane(store: store)
                 case .projects:    ProjectsPane(store: store)
                 case .recordings:  RecordingsPane()
+                case .mcp:         MCPPane()
                 case .logs:        LogsPane()
                 }
             }

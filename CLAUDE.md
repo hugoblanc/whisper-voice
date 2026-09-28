@@ -65,6 +65,15 @@ NSTabView with 3 tabs:
 - **Shortcuts**: Toggle shortcut, PTT key selection
 - **Logs**: Real-time log viewer with auto-scroll
 
+### MCP Server
+The same binary serves the Model Context Protocol when launched with `--mcp` (`main.swift` branches before `NSApplication` starts, see `MCP/MCPServer.swift`).
+It speaks JSON-RPC over stdio and supports both the stateless `server/discover` era and the legacy `initialize` handshake.
+Rules for this process:
+- stdout is reserved for protocol messages; `LogManager.writesToStderr` routes logs to stderr (it would also clobber `logs.txt`, which the app rewrites whole).
+- History and projects are read from disk on every call (`HistoryManager.readEntriesFromDisk`, `ProjectStore.readProjectsFromDisk`) and never written: the app process owns those files.
+- `transcribe_audio_file` refuses the local whisper.cpp provider, whose `whisper-server` process belongs to the app.
+`MCP/MCPInstaller.swift` writes the server entry into Claude Desktop / Cursor / Windsurf / VS Code configs (Preferences → AI assistants), keeping a `.whispervoice-backup` copy of the previous file.
+
 ## Configuration
 Config file: `~/.whisper-voice-config.json`
 ```json

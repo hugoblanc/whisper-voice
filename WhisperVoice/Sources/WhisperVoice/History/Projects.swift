@@ -31,25 +31,36 @@ class ProjectStore {
         let appSupport = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/WhisperVoice")
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
-        fileURL = appSupport.appendingPathComponent("projects.json")
+        fileURL = Self.projectsFileURL
         loadFromDisk()
+    }
+
+    static let projectsFileURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/WhisperVoice/projects.json")
+
+    /// Read projects straight from disk without touching the shared instance
+    /// (used by the MCP server process), sorted by creation date.
+    static func readProjectsFromDisk() -> [Project] {
+        guard let data = try? Data(contentsOf: projectsFileURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = root["projects"] as? [[String: Any]] else { return [] }
+        let projects: [Project] = list.compactMap { dict in
+            guard let idStr = dict["id"] as? String, let id = UUID(uuidString: idStr),
+                  let name = dict["name"] as? String else { return nil }
+            let color = dict["color"] as? String
+            let createdAtTS = dict["createdAt"] as? TimeInterval ?? 0
+            let archived = dict["archived"] as? Bool ?? false
+            return Project(id: id, name: name, color: color,
+                           createdAt: Date(timeIntervalSince1970: createdAtTS),
+                           archived: archived)
+        }
+        return projects.sorted { $0.createdAt < $1.createdAt }
     }
 
     private func loadFromDisk() {
         queue.sync {
-            guard let data = try? Data(contentsOf: fileURL),
-                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let list = root["projects"] as? [[String: Any]] else { return }
-            for dict in list {
-                guard let idStr = dict["id"] as? String, let id = UUID(uuidString: idStr),
-                      let name = dict["name"] as? String else { continue }
-                let color = dict["color"] as? String
-                let createdAtTS = dict["createdAt"] as? TimeInterval ?? 0
-                let archived = dict["archived"] as? Bool ?? false
-                let project = Project(id: id, name: name, color: color,
-                                      createdAt: Date(timeIntervalSince1970: createdAtTS),
-                                      archived: archived)
-                projectsByID[id] = project
+            for project in Self.readProjectsFromDisk() {
+                projectsByID[project.id] = project
             }
         }
     }

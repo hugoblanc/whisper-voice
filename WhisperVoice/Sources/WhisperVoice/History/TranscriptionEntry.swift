@@ -68,11 +68,25 @@ class HistoryManager {
         return e
     }()
 
+    static let historyFileURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/WhisperVoice/history.json")
+
+    /// Read the history straight from disk, newest first, without touching the
+    /// shared instance. Used by the MCP server, which runs in its own process
+    /// while the app keeps writing the file.
+    static func readEntriesFromDisk() -> [TranscriptionEntry] {
+        guard let data = try? Data(contentsOf: historyFileURL),
+              let decoded = try? JSONDecoder().decode([TranscriptionEntry].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
     private init() {
         let appSupport = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/WhisperVoice")
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
-        historyFileURL = appSupport.appendingPathComponent("history.json")
+        historyFileURL = Self.historyFileURL
 
         // Exports live under Application Support (no TCC "Folders & Files"
         // permission needed, unlike ~/Documents on Hardened Runtime).
@@ -97,8 +111,9 @@ class HistoryManager {
     private func saveHistory() {
         queue.async { [weak self] in
             guard let self = self else { return }
+            // Atomic so a concurrent reader (the MCP server process) never sees a half-written file.
             if let data = try? JSONEncoder().encode(self.entries) {
-                try? data.write(to: self.historyFileURL)
+                try? data.write(to: self.historyFileURL, options: .atomic)
             }
         }
     }

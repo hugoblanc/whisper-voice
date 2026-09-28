@@ -1474,6 +1474,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Main
 
+// Launched by an MCP client (Claude Desktop, Claude Code, Cursor…) rather than
+// by the user: serve the Model Context Protocol on stdio, never start the UI.
+if CommandLine.arguments.contains("--mcp") {
+    LogManager.writesToStderr = true
+    MCPServer().run()
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

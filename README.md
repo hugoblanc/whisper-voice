@@ -87,6 +87,25 @@ Switch modes by pressing **Shift** during recording:
 - Copy or delete entries
 - Shows provider and mode used
 
+### MCP Server (Claude Desktop, Claude Code, Cursor…)
+Whisper Voice ships a local [MCP](https://modelcontextprotocol.io) server, so AI assistants can use your dictation history.
+Open **Preferences → AI assistants** and click **Add** next to Claude Desktop, Cursor, Windsurf or VS Code, then restart that app.
+For Claude Code, copy the command shown there, or run:
+
+```bash
+claude mcp add --scope user whisper-voice -- '/Applications/Whisper Voice.app/Contents/MacOS/WhisperVoice' --mcp
+```
+
+Any other MCP client can launch the same command (`WhisperVoice --mcp`, stdio transport).
+Tools exposed:
+- `search_transcriptions`: search dictations by words, date range, app or project.
+- `get_transcription`: one dictation with its capture context (window title, browser URL, terminal directory, git branch).
+- `list_projects`: project tags with dictation counts.
+- `transcribe_audio_file`: transcribe a local audio file with your configured OpenAI or Mistral provider.
+
+The server reads the history in place and never modifies it.
+Only `transcribe_audio_file` sends data out, to your transcription provider.
+
 ### Custom Vocabulary
 Add proper nouns and technical terms (e.g., "PostHog", "Kubernetes") in Preferences to improve transcription accuracy across all providers.
 
