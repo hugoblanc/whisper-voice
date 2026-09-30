@@ -72,6 +72,8 @@ Rules for this process:
 - stdout is reserved for protocol messages; `LogManager.writesToStderr` routes logs to stderr (it would also clobber `logs.txt`, which the app rewrites whole).
 - History and projects are read from disk on every call (`HistoryManager.readEntriesFromDisk`, `ProjectStore.readProjectsFromDisk`) and never written: the app process owns those files.
 - `transcribe_audio_file` refuses the local whisper.cpp provider, whose `whisper-server` process belongs to the app.
+- `transcribe_audio_file` takes a local `path` or an http(s) `url` (plus optional `headers`); a download is stored in a temporary file with a real audio extension and deleted after the call.
+- `list_voice_messages` (`MCP/VoiceMessageFinder.swift`) reads WhatsApp desktop's `ChatStorage.sqlite` read-only and scans `~/Downloads`. WhatsApp's schema is not a public contract: a failure there is returned as a `notes` entry, never as a tool error.
 `MCP/MCPInstaller.swift` writes the server entry into Claude Desktop / Cursor / Windsurf / VS Code configs (Preferences → AI assistants), keeping a `.whispervoice-backup` copy of the previous file.
 
 ## Configuration

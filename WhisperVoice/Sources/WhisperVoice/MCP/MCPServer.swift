@@ -20,13 +20,22 @@ final class MCPServer {
     private static let versionMetaKey = "io.modelcontextprotocol/protocolVersion"
     private static let serverInfoMetaKey = "io.modelcontextprotocol/serverInfo"
 
+    /// Caching hints the stateless era requires on server/discover and tools/list
+    /// results; clients reject those results without them. Both answers are the
+    /// same for every user ("public"), and a ttlMs of 0 keeps them always stale:
+    /// re-asking a local stdio process costs nothing, while a cached tool list
+    /// would hide the tools added by an app update.
+    private static let cacheHints: [String: Any] = ["ttlMs": 0, "cacheScope": "public"]
+
     private static let instructions = """
     Whisper Voice is the user's macOS dictation app. Every dictation is kept in a local history \
     with the text, the time, the app it was dictated into and an optional project tag. \
     Use search_transcriptions to find what the user dictated (filter by words, date range, app or project), \
     get_transcription for one entry's full context (window title, browser URL, terminal directory), \
-    list_projects to see the project tags, and transcribe_audio_file to turn a local audio file into text \
-    with the user's configured provider.
+    list_projects to see the project tags, and transcribe_audio_file to turn an audio file (a local path or an http(s) URL) \
+    into text with the user's configured provider. \
+    When the user wants a voice message they received transcribed (WhatsApp voice note, Slack clip), call list_voice_messages \
+    to find it on this Mac, then transcribe_audio_file with its path; do not ask them to export or upload the file first.
     """
 
     private let tools = MCPTools()
@@ -106,13 +115,14 @@ final class MCPServer {
                 "supportedVersions": Self.supportedVersions,
                 "capabilities": ["tools": [String: Any]()],
                 "instructions": Self.instructions,
-            ], id: id, modern: true)
+            ].merging(Self.cacheHints) { current, _ in current }, id: id, modern: true)
 
         case "ping":
             send(result: [:], id: id, modern: isModern)
 
         case "tools/list":
-            send(result: ["tools": MCPTools.definitions], id: id, modern: isModern)
+            send(result: ["tools": MCPTools.definitions].merging(Self.cacheHints) { current, _ in current },
+                 id: id, modern: isModern)
 
         case "tools/call":
             guard let name = params["name"] as? String else {

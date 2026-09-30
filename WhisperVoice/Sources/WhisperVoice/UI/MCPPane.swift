@@ -13,7 +13,7 @@ struct MCPPane: View {
     var body: some View {
         Form {
             Section {
-                Text("Give Claude and other AI assistants access to your dictation history: search what you dictated, filter by app, project or date, and transcribe audio files. The server runs locally from this app; your history never leaves your Mac, except audio you ask to transcribe, which goes to your configured provider.")
+                Text("Give Claude and other AI assistants access to your dictation history: search what you dictated, filter by app, project or date, and transcribe audio files or the voice messages you received (WhatsApp, Downloads). The server runs locally from this app; your history never leaves your Mac, except audio you ask to transcribe, which goes to your configured provider.")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
             }

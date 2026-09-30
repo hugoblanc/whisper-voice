@@ -101,9 +101,13 @@ Tools exposed:
 - `search_transcriptions`: search dictations by words, date range, app or project.
 - `get_transcription`: one dictation with its capture context (window title, browser URL, terminal directory, git branch).
 - `list_projects`: project tags with dictation counts.
-- `transcribe_audio_file`: transcribe a local audio file with your configured OpenAI or Mistral provider.
+- `transcribe_audio_file`: transcribe an audio file, given as a local path or an http(s) URL (with optional headers for private links), with your configured OpenAI or Mistral provider.
+- `list_voice_messages`: find the voice messages already on your Mac, newest first: voice notes received in WhatsApp desktop (with chat, sender and duration) and audio files in `~/Downloads`.
+
+Together the last two let you ask "transcribe the last voice note from Marie" without exporting anything.
 
 The server reads the history in place and never modifies it.
+`list_voice_messages` opens WhatsApp desktop's local database read-only, for the chat name, sender, date and file path of audio messages only; it never reads message text.
 Only `transcribe_audio_file` sends data out, to your transcription provider.
 
 ### Custom Vocabulary
